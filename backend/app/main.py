@@ -170,7 +170,7 @@ def _scheduler_loop(stop) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Hackathon Command Center", lifespan=lifespan,
+    app = FastAPI(title="Aion", lifespan=lifespan,
                   docs_url=None if settings.app_managed else "/docs",
                   redoc_url=None if settings.app_managed else "/redoc",
                   openapi_url=None if settings.app_managed else "/openapi.json")

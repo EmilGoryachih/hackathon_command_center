@@ -5,6 +5,7 @@ import ctypes
 import json
 import os
 import uuid
+import threading
 from pathlib import Path
 
 from control.archives import ArchiveError, decrypt_archive, encrypt_archive
@@ -59,6 +60,14 @@ class Vault:
         self.windows = os.name == "nt" if windows is None else windows
         self.password: str | None = None
         self.values: dict[str, str] | None = None
+        self.shared: Vault | None = None
+        self.lock = threading.RLock()
+
+    def bind_shared(self, shared: Vault) -> None:
+        self.shared = shared
+        if self.unlocked:
+            for name in ('telegram', 'gemini', 'fxtunnel'):
+                self.get(name)
 
     @property
     def unlocked(self) -> bool:
@@ -85,10 +94,27 @@ class Vault:
             else:
                 raise VaultError("Разблокируйте локальное хранилище Linux")
         assert self.values is not None
-        return self.values.get(name, "")
+        if self.shared and name in {'telegram', 'gemini', 'fxtunnel'}:
+            if not self.shared.unlocked:
+                self.shared.unlock(self.password or '')
+            with self.shared.lock:
+                self.shared.get(name)
+                assert self.shared.values is not None
+                if name not in self.shared.values and self.values.get(name):
+                    self.shared.put(name, self.values[name])
+                return self.shared.get(name).strip()
+        value = self.values.get(name, "")
+        return value.strip() if name in {'telegram', 'gemini', 'fxtunnel'} else value
 
     def put(self, name: str, value: str) -> None:
+        with self.lock:
+            self._put(name, value)
+
+    def _put(self, name: str, value: str) -> None:
         self.get(name)
+        if self.shared and name in {'telegram', 'gemini', 'fxtunnel'}:
+            self.shared.put(name, value.strip())
+            return
         assert self.values is not None
         next_values = {**self.values, name: value}
         raw = json.dumps(next_values).encode()

@@ -506,6 +506,7 @@ export const api = {
 }
 
 export interface TelegramSettingsData {
+  chat_managed:boolean
   project_id:number;bot_connected:boolean;chat_id:string|null;routes:Record<string,number|null>;public_url:string
   events:Record<string,string>;missing_usernames:{id:number;name:string}[];pending:number;queue_policy:string
 }

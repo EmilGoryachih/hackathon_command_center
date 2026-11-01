@@ -42,7 +42,8 @@ export function TelegramSettings({isAdmin}:{isAdmin:boolean}) {
         <button className="small" disabled={busy} onClick={()=>act(async()=>{setSaved(await api.telegramSettings())},'Состояние обновлено')}>Обновить состояние</button>
       </details>}
       <p className="muted">Добавьте бота в тестовый чат и разрешите отправку. Введите числовой ID чата и ID нужных тем вручную. Чат без тем: выберите «Общий чат». Автоматического списка всех тем Telegram нет.</p>
-      <Field label="ID чата текущего проекта"><input value={chat} placeholder="-100…" onChange={e=>setChat(e.target.value)}/></Field>
+      <Field label="ID чата текущего проекта"><input value={chat} placeholder="-100…" readOnly={saved.chat_managed} onChange={e=>setChat(e.target.value)}/></Field>
+      {saved.chat_managed&&<p className="muted">Суперчат из Ouroboros Daemon. Здесь настраиваются темы и события.</p>}
       <Field label="Адрес платформы для команды (необязательно)"><input value={url} placeholder="https://… или сетевой адрес" onChange={e=>setUrl(e.target.value)}/></Field>
       <p className="muted">{saved.queue_policy} Ожидает при последней загрузке: {saved.pending}.</p>
       <div className="telegram-routes">{Object.entries(saved.events).map(([key,label])=>{

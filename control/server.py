@@ -261,7 +261,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
             if not folder.is_dir() or folder.is_relative_to(Path(controller.config["data_dir"]).resolve()) or folder.is_relative_to(controller.folder):
                 raise ArchiveError("Выберите существующую отдельную папку внешних копий вне данных и панели")
         for name in ("telegram", "gemini"):
-            value = getattr(body, name)
+            value = getattr(body, name).strip()
             if name in body.clear_keys:
                 controller.vault.put(name, '')
             elif value:
@@ -276,7 +276,13 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
                                  telegram_thread=body.telegram_thread, telegram_alert_chat=body.telegram_alert_chat,
                                  telegram_alert_thread=body.telegram_alert_thread, administrator=body.administrator.lstrip('@'))
         controller.persist()
+        controller.sync_project_settings()
         return {"status": "ok", "message": "Секреты сохранены локально. Для обновления секретов контейнера выполните перезапуск."}
+
+    @app.post('/api/events/clear')
+    def clear_events():
+        controller.clear_events()
+        return {'status': 'ok'}
 
     @app.post("/api/tunnel/settings")
     def tunnel_settings(body: TunnelRequest):
@@ -284,8 +290,8 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
             controller.tunnel.stop()
             controller.config['tunnel_desired'] = False
             controller.vault.put('fxtunnel', '')
-        elif body.fxtunnel:
-            controller.vault.put("fxtunnel", body.fxtunnel)
+        elif body.fxtunnel.strip():
+            controller.vault.put("fxtunnel", body.fxtunnel.strip())
         controller.config["subdomain"] = body.subdomain or 'dots-bots-hub'
         if controller.config['desired'] and controller.vault.get('fxtunnel'):
             controller.config['tunnel_desired'] = True
@@ -299,7 +305,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
         return controller.credentials()
 
     @app.post("/api/action/{action}", status_code=202)
-    def action(action: Literal["start", "stop", "restart", "build", "check", "backup", "telegram", "telegram-test", "tunnel-start", "tunnel-stop"]):
+    def action(action: Literal["start", "stop", "restart", "build", "check", "backup", "telegram", "telegram-test", "tunnel-start", "tunnel-stop", "keys-check"]):
         with controller.state_lock:
             if controller.busy:
                 raise HTTPException(409, "Дождитесь завершения текущей операции")
@@ -325,7 +331,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
         record = next((row for row in controller.history["records"] if row["id"] == backup_id), None)
         if record is None:
             raise HTTPException(404, "Копия не найдена")
-        return FileResponse(controller.folder / "backups" / record["file"], filename=record["file"], media_type="application/octet-stream")
+        return FileResponse(controller.backup_folder / record["file"], filename=record["file"], media_type="application/octet-stream")
 
     @app.post("/api/restore/inspect")
     def inspect(file: UploadFile = File(), key: str = Form()):
@@ -349,7 +355,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
             if pending.pop(body.ticket, None) is not item:
                 raise ArchiveError("Этот архив уже использован; выполните проверку заново")
             controller.busy = "Восстановление"
-            controller.config.update(desired=False, transfer_pending=True, restore_verified=False)
+            controller.config.update(desired=False, transfer_pending=True, restore_verified=False, local_split=False)
             controller.persist()
             controller.docker.compose(["stop", "-t", "130", "app"], timeout=150)
             if (Path(controller.config["data_dir"]) / "hackathon.db").exists():

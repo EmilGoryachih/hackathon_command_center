@@ -4,16 +4,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import threading
 import time
 import urllib.error
 import urllib.request
+import psutil
 from pathlib import Path
 from typing import Any
 
 from control.vault import atomic_write
+from control.integrations import tunnel_binary
 
 
 def configuration(subdomain: str) -> dict[str, Any]:
@@ -39,24 +40,30 @@ class Tunnel:
         self.current_url: str | None = None
         self.checked_at: float | None = None
         self.error: str | None = "Не настроен"
+        self.started = 0.0
 
     def start(self, token: str, subdomain: str) -> None:
         if not token:
             raise ValueError("Введите секрет fxTunnel в локальной панели")
-        binary = shutil.which("fxtunnel")
-        if not binary and os.name == "nt":
-            candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "fxTunnel" / "fxtunnel.exe"
-            binary = str(candidate) if candidate.is_file() else None
+        binary = tunnel_binary()
         if not binary:
             raise ValueError("Установите официальный CLI fxTunnel с fxtun.ru/docs/install, затем повторите запуск")
         self.stop()
         path = self.folder / "fxtunnel.json"
         atomic_write(path, json.dumps(configuration(subdomain)).encode())
         environment = {**os.environ, "FXTUNNEL_TOKEN": token, "FXTUNNEL_INSPECT_ENABLED": "false"}
-        self.process = subprocess.Popen([binary, "--config", str(path), "--no-inspect"], cwd=self.folder,
+        self.process = subprocess.Popen([binary, "--config", str(path), "--no-inspect", "--log-level", "info"], cwd=self.folder,
                                         env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         self.error = "Подключаемся; публичный адрес ещё не проверен"
+        self.started = time.time()
+        try:
+            child = psutil.Process(self.process.pid)
+            atomic_write(self.folder / 'tunnel-process.json', json.dumps({
+                'pid': child.pid, 'created': child.create_time(), 'executable': child.exe()
+            }).encode())
+        except psutil.Error:
+            pass
         threading.Thread(target=self._read_output, args=(self.process,), daemon=True).start()
 
     def _read_output(self, process: subprocess.Popen) -> None:
@@ -70,11 +77,16 @@ class Tunnel:
         if process is self.process:
             self.current_url = None
             self.error = "Туннель завершился. Проверьте подключение и запустите его вручную."
+            self.process = None
 
     def check(self) -> None:
         self.checked_at = time.time()
         self.current_url = None
-        if not self.process or self.process.poll() is not None or not self.issued_url:
+        if self.process and (self.process.poll() is not None or
+                             (not self.issued_url and time.time() - self.started > 60)):
+            self.stop()
+            self.error = 'fxTunnel не открыл адрес за 60 с. Проверьте ключ, сеть и занятость поддомена'
+        if not self.process or not self.issued_url:
             return
         try:
             # No cookies or credentials leave the local panel. HTTPS validation stays enabled.
@@ -95,6 +107,28 @@ class Tunnel:
             self.error = "Публичный адрес или защита входа не прошли проверку. Ссылка не публикуется как действующая."
 
     def stop(self) -> None:
+        # Recover only the exact child left by this installation after a hub crash.
+        ownership = self.folder / 'tunnel-process.json'
+        try:
+            record = json.loads(ownership.read_text()) if ownership.exists() else None
+            if record:
+                child = psutil.Process(record['pid'])
+                if (child.create_time() == record['created'] and child.exe() == record['executable']
+                        and str(self.folder / 'fxtunnel.json') in child.cmdline()):
+                    children = child.children(recursive=True)
+                    child.terminate()
+                    for descendant in children:
+                        try:
+                            descendant.terminate()
+                        except psutil.NoSuchProcess:
+                            pass
+                    _, alive = psutil.wait_procs([child, *children], timeout=10)
+                    for remaining in alive:
+                        remaining.kill()
+                    psutil.wait_procs(alive, timeout=5)
+        except (psutil.Error, OSError, ValueError, KeyError):
+            pass
+        ownership.unlink(missing_ok=True)
         if self.process and self.process.poll() is None:
             self.process.terminate()
             try:

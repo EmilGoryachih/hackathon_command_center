@@ -9,6 +9,7 @@ from app.services import telegram as svc, telegram_vault as vault
 from app.services.audit import write_audit
 from app.telegram_schemas import TelegramConfig, TestDelivery, DeliveryRetry
 from app.timeutil import utcnow
+from app.config import settings as app_settings
 
 router = APIRouter(tags=['telegram'])
 
@@ -31,9 +32,10 @@ def delete_key(db: Session = Depends(get_db), user: User = Depends(require_admin
 
 @router.get('/projects/{project_id}/telegram')
 def settings(project_id: int, db: Session = Depends(get_db), _user: User = Depends(require_captain_or_admin)) -> dict:
-    cfg = db.get(TelegramSettings, project_id)
+    cfg = svc.project_config(db, project_id)
+    db.commit()
     users = db.query(User).filter(User.id.in_(project_member_ids(db, project_id))).all()
-    return {'project_id': project_id, 'bot_connected': vault.is_saved(),
+    return {'project_id': project_id, 'bot_connected': vault.is_saved(), 'chat_managed': app_settings.app_managed,
             'chat_id': cfg.chat_id if cfg else None, 'routes': cfg.routes if cfg else {},
             'public_url': cfg.public_url if cfg else '', 'events': svc.EVENTS,
             'missing_usernames': [{'id': u.id, 'name': u.display_name} for u in users
@@ -46,8 +48,10 @@ def settings(project_id: int, db: Session = Depends(get_db), _user: User = Depen
 @router.put('/projects/{project_id}/telegram')
 def save(project_id: int, body: TelegramConfig, db: Session = Depends(get_db),
          user: User = Depends(require_captain_or_admin)) -> dict:
-    cfg = db.get(TelegramSettings, project_id)
+    cfg = svc.project_config(db, project_id)
     old_chat = cfg.chat_id if cfg else None
+    if app_settings.app_managed and body.chat_id != old_chat:
+        raise api_error(409, 'CHAT_MANAGED', 'ID суперчата задаётся в Ouroboros Daemon')
     if old_chat != body.chat_id and not body.confirm_chat:
         raise api_error(409, 'CHAT_CONFIRMATION_REQUIRED', 'Подтвердите чат текущего проекта; старая очередь сохранит прежнее направление')
     if cfg is None:
@@ -63,7 +67,7 @@ def save(project_id: int, body: TelegramConfig, db: Session = Depends(get_db),
 @router.post('/projects/{project_id}/telegram/test', status_code=202)
 def test(project_id: int, body: TestDelivery, db: Session = Depends(get_db),
          user: User = Depends(require_captain_or_admin)) -> dict:
-    cfg = db.get(TelegramSettings, project_id)
+    cfg = svc.project_config(db, project_id)
     if not cfg or not cfg.chat_id or cfg.chat_id != body.confirmed_chat_id:
         raise api_error(409, 'CHAT_MISMATCH', 'Сначала сохраните и подтвердите тестовый чат текущего проекта')
     row = svc.enqueue(db, project_id, 'test', f'🧪 ТЕСТОВОЕ сообщение платформы\n\nПроект: #{project_id}\nПроверка доставки Telegram.', [], test_thread=body.thread_id)

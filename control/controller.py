@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import secrets
@@ -61,7 +62,10 @@ class Controller:
         self.events: list[dict[str, Any]] = []
         event_file = self.folder / 'events.json'
         if event_file.exists():
-            self.events = json.loads(event_file.read_text())[-100:]
+            previous_events = json.loads(event_file.read_text())
+            self.events = previous_events[-40:]
+            if len(previous_events) > 40:
+                atomic_write(event_file, json.dumps(self.events).encode())
         self.operation_error: str | None = None
         self.status: dict[str, Any] = {"checked_at": None, "engine": None, "container": None, "api": None,
                                        "ui": None, "metrics": [], "error": "Проверка ещё не выполнялась"}
@@ -136,14 +140,88 @@ class Controller:
             atomic_write(self.folder / "history.json", json.dumps(self.history).encode())
 
     def event(self, message: str, level: str = "info") -> None:
-        self.events.append({"at": time.time(), "message": message, "level": level})
-        self.events = self.events[-100:]
-        atomic_write(self.folder / "events.json", json.dumps(self.events).encode())
+        with self.state_lock:
+            self.events.append({"at": time.time(), "message": message, "level": level})
+            self.events = self.events[-40:]
+            atomic_write(self.folder / "events.json", json.dumps(self.events).encode())
+
+    def clear_events(self) -> None:
+        with self.state_lock:
+            self.events = []
+            atomic_write(self.folder / 'events.json', b'[]')
+
+    def key_states(self) -> dict[str, dict[str, Any]]:
+        folder = (self.vault.shared or self.vault).folder
+        path = folder / 'key-status.json'
+        try:
+            saved = json.loads(path.read_text()) if path.exists() else {}
+        except (OSError, ValueError):
+            saved = {}
+        states = {}
+        for name in ('telegram', 'gemini', 'fxtunnel'):
+            key = self.vault.get(name) if self.vault.unlocked else ''
+            item = saved.get(name, {})
+            valid = key and item.get('fingerprint') == hashlib.sha256(key.encode()).hexdigest()
+            states[name] = {k: v for k, v in item.items() if k != 'fingerprint'} if valid else {
+                'status': 'locked' if not self.vault.unlocked else 'unknown' if key else 'missing',
+                'detail': 'Хранилище заблокировано' if not self.vault.unlocked else
+                          'Ключ сохранён; проверка не выполнялась' if key else 'Ключ не задан'}
+            if name != 'fxtunnel' and self.config['desired']:
+                states[name]['restart_required'] = (self.history.get('staged_keys', {}).get(name)
+                    != hashlib.sha256(key.encode()).hexdigest())
+        return states
+
+    def validate_keys(self) -> None:
+        from control.integrations import validate
+        target = self.vault.shared or self.vault
+        states = {}
+        for name in ('telegram', 'gemini', 'fxtunnel'):
+            key = self.vault.get(name)
+            status, detail = validate(name, key)
+            states[name] = {'status': status, 'detail': detail, 'checked_at': time.time(),
+                            'fingerprint': hashlib.sha256(key.encode()).hexdigest()}
+        if self.config['desired'] and self.status.get('api'):
+            # Check the actual container's network and mounted keys, not only Windows.
+            script = ("import json; from app.config import settings; "
+                      "from control.integrations import validate; "
+                      "print(json.dumps({n:validate(n, settings.secret_value(n)) for n in ('telegram','gemini')}))")
+            try:
+                runtime = json.loads(self.docker.compose(['exec', '-T', 'app', 'python', '-c', script], timeout=60))
+                for name in ('telegram', 'gemini'):
+                    status, detail = runtime[name]
+                    states[name]['runtime_status'] = status
+                    states[name]['detail'] += ' · Aion: ' + detail
+                    if status != 'valid':
+                        states[name]['status'] = status
+            except (DockerError, ValueError, KeyError, TypeError):
+                for name in ('telegram', 'gemini'):
+                    states[name]['detail'] += ' · Проверка контейнера не завершена'
+        atomic_write(target.folder / 'key-status.json', json.dumps(states).encode())
+
+    @property
+    def backup_folder(self) -> Path:
+        folder = Path(self.config['data_dir']) / 'backups'
+        legacy = self.folder / 'backups'
+        for record in self.history['records']:
+            name = record['file']
+            if Path(name).name != name:
+                raise ArchiveError('Неверное имя резервной копии')
+            old, destination = legacy / name, folder / name
+            if old.is_file() and not destination.exists():
+                atomic_write(destination, old.read_bytes())
+        return folder
+
+    def sync_project_settings(self) -> None:
+        if self.config['configured']:
+            atomic_write(Path(self.config['data_dir']) / '.hub-settings.json', json.dumps({
+                'telegram_chat': self.config.get('telegram_alert_chat') or self.config.get('telegram_chat', '')
+            }).encode())
 
     def view(self) -> dict[str, Any]:
         return {**self.status, "version": VERSION, "config": self.config, "history": self.history,
                 "services": self.service_states(), "operation_error": self.operation_error,
-                "busy": self.busy, "events": self.events[-25:], "vault_unlocked": self.vault.unlocked,
+                "busy": self.busy, "events": self.events, "vault_unlocked": self.vault.unlocked,
+                "keys": self.key_states(), "backup_folder": str(self.backup_folder),
                 "recovery_attempts": len(self.policy.attempts), "recovery_exhausted": self.policy.exhausted,
                 "host_platform": os.name, "local_url": "http://127.0.0.1:8000",
                 "tunnel": {"url": self.tunnel.current_url, "checked_at": self.tunnel.checked_at, "error": self.tunnel.error}}
@@ -228,6 +306,7 @@ class Controller:
                 runtime.rmdir()
 
     def stage_secrets(self) -> None:
+        self.sync_project_settings()
         self.write_compose()
         values = {name: self.vault.get(name) for name in ("operator", "bootstrap_password", "gemini", "telegram")}
         # Values travel over stdin, never in command arguments, logs, Compose or environment.
@@ -239,6 +318,9 @@ class Controller:
         else:
             for name, value in values.items():
                 atomic_write(Path(self.runtime) / name, value.encode())
+        self.history['staged_keys'] = {name: hashlib.sha256(values[name].encode()).hexdigest()
+                                      for name in ('telegram', 'gemini')}
+        self.persist()
 
     def execute(self, action: str) -> None:
         if action == "stop":
@@ -260,6 +342,8 @@ class Controller:
                     raise ArchiveError("Сначала завершите первоначальную настройку")
                 if self.config["transfer_pending"]:
                     raise ArchiveError("Сначала завершите мастер переноса")
+                self.status.update(api=None, ui=None)
+                self.tunnel.stop()
                 self.stage_secrets()
                 self.config["desired"] = True
                 self.config['tunnel_desired'] = bool(self.vault.get('fxtunnel'))
@@ -269,7 +353,9 @@ class Controller:
                 try:
                     if action == "restart":
                         self.docker.compose(["stop", "-t", "130", "app"], timeout=150)
-                    self.docker.compose(["up", "--detach", "--no-build", "--force-recreate", "app"])
+                    # A manual launch must use the current code, including bootstrap and UI.
+                    self.write_compose()
+                    self.docker.compose(["up", "--detach", "--build", "--force-recreate", "app"], timeout=900)
                 except DockerError:
                     self.config["desired"] = False
                     self.persist()
@@ -277,6 +363,8 @@ class Controller:
                 self.started, self.policy = time.time(), RecoveryPolicy()
                 self.event("Платформа запущена" if action == "start" else "Платформа перезапущена")
             elif action == "stop":
+                self.config['tunnel_desired'] = False
+                self.persist()
                 self.tunnel.stop()
                 self.docker.compose(["stop", "-t", "130", "app"], timeout=150)
                 self.status.update(api=False, ui=False, error=None,
@@ -299,8 +387,14 @@ class Controller:
                 if self.config["transfer_pending"] or not self.config["desired"]:
                     raise ArchiveError("Сначала завершите перенос и запустите платформу")
                 try:
-                    self.tunnel.start(self.vault.get("fxtunnel"), self.config.get("subdomain", ""))
+                    if not self.vault.get('fxtunnel'):
+                        raise ValueError('Введите ключ fxTunnel')
                     self.config['tunnel_desired'] = True
+                    self.tunnel_attempts, self.last_tunnel_attempt = 0, 0.0
+                    if self.status['api'] and self.status['ui']:
+                        self.tunnel.start(self.vault.get("fxtunnel"), self.config.get("subdomain", ""))
+                    else:
+                        self.tunnel.error = 'Ожидаем готовности Aion; туннель откроется автоматически'
                     self.persist()
                 except ValueError as exc:
                     raise ArchiveError(str(exc)) from None
@@ -308,6 +402,8 @@ class Controller:
                 self.tunnel.stop()
                 self.config['tunnel_desired'] = False
                 self.persist()
+            elif action == 'keys-check':
+                self.validate_keys()
             else:
                 raise ArchiveError("Действие не предусмотрено")
             self.update_services()
@@ -321,10 +417,10 @@ class Controller:
         desired = self.config['desired']
         engine = state('ok', 'Движок готов') if self.status['engine'] else state(
             'error' if self.status['checked_at'] else 'unknown', self.status.get('error') or 'Проверка ещё не завершена')
-        api = state('ok', 'Платформа доступна') if self.status['api'] else state(
+        api = state('ok', 'Платформа доступна') if self.status['api'] and self.status['ui'] else state(
             'loading' if self.busy in {'start','restart','build'} or (desired and time.time()-self.started < 90) else 'error' if desired else 'waiting',
             self.status.get('error') or ('Ожидаем готовность API' if desired else 'Запускается на вкладке настроек'))
-        tunnel = state('ok', self.tunnel.current_url) if self.tunnel.current_url else state(
+        tunnel = state('waiting', 'Ожидаем готовности Aion') if desired and not (self.status['api'] and self.status['ui']) else state('ok', self.tunnel.current_url) if self.tunnel.current_url else state(
             'loading' if self.tunnel.process and self.tunnel.process.poll() is None else 'error' if desired and self.config.get('tunnel_desired') else 'waiting',
             self.tunnel.error or 'Ожидает открытия')
         telegram = state('error', self.history['telegram_error']) if self.history.get('telegram_error') else state(
@@ -377,7 +473,8 @@ class Controller:
         now = time.time()
         metrics: dict[str, Any] = {"at": now, "host_cpu": psutil.cpu_percent(), "host_memory": psutil.virtual_memory().percent,
                                    "panel_memory_bytes": psutil.Process().memory_info().rss, "container_cpu": None, "container_memory": None}
-        result = {**self.status, "error": None, "api": None, "ui": None, "storage_error": False}
+        result = {**self.status, "error": None, "api": None, "ui": None, "storage_error": False,
+                  "compatibility_error": False}
         try:
             result["engine"] = self.docker.ready()
             result["container"] = self.docker.container() if self.config["configured"] else None
@@ -415,14 +512,25 @@ class Controller:
                     try:
                         with urllib.request.urlopen("http://127.0.0.1:8000" + route, timeout=4) as response:
                             result[key] = response.status == 200
+                            if key == 'api' and result[key]:
+                                payload = json.loads(response.read(65536))
+                                compatible = (isinstance(payload, dict) and payload.get('status') == 'ok' and payload.get('version') == VERSION
+                                              and payload.get('installation') == self.config['id']
+                                              and type(payload.get('project_id')) is int and payload['project_id'] > 0)
+                                if not compatible:
+                                    result.update(api=False, compatibility_error=True,
+                                        error='Запущен устаревший образ Aion или другая установка. Остановите платформу и запустите снова для сборки текущей версии.')
                     except urllib.error.HTTPError as exc:
                         result[key] = False
                         if key == "api" and exc.code == 503:
                             try:
-                                result["storage_error"] = json.loads(exc.read(65536)).get("reason") == "storage"
+                                reason = json.loads(exc.read(65536)).get("reason")
+                                result["storage_error"] = reason == "storage"
+                                if reason == 'project':
+                                    result['error'] = 'Aion не готов: проект, доска или активный администратор отсутствуют. Проверьте данные проекта.'
                             except (ValueError, OSError):
                                 pass
-                    except OSError:
+                    except (OSError, ValueError, TypeError):
                         result[key] = False
                 startup = Path(self.config["data_dir"]) / ".startup-state.json"
                 try:
@@ -433,7 +541,7 @@ class Controller:
                 if result["storage_error"]:
                     result["error"] = "Папка данных недоступна для записи или диск заполнен. Исправьте хранение; автоматический перезапуск не выполняется."
                 if self.policy.should_restart(now=now, desired=self.config["desired"], started=self.started,
-                                              healthy=result["api"] is True or result["storage_error"] or startup_state.get("phase") == "migrations", running=True):
+                                              healthy=result["api"] is True or result["storage_error"] or result['compatibility_error'] or startup_state.get("phase") == "migrations", running=True):
                     self.event("API не отвечает: ограниченная попытка перезапуска", "warning")
                     self.docker.compose(["restart", "-t", "130", "app"], timeout=150)
                     self.started = time.time()
@@ -464,7 +572,7 @@ class Controller:
             raise ArchiveError("Проверка шифрования не пройдена")
         record = {"id": manifest["id"], "file": f'hcc-{self.config["id"]}-{manifest["id"]}.hcc',
                   "created": start, "size": len(encrypted), "seconds": time.time() - start, "fingerprint": manifest["fingerprint"]}
-        folder = self.folder / "backups"
+        folder = self.backup_folder
         folder.mkdir(exist_ok=True)
         if shutil.disk_usage(folder).free < len(encrypted) * 2 + 64 * 1024 * 1024:
             raise ArchiveError("Недостаточно места для копии. Последняя пригодная копия сохранена.")
@@ -498,7 +606,7 @@ class Controller:
                          and destination.exists() and destination.stat().st_size == latest["size"]
                          and destination.stat().st_mtime_ns == self.history.get("external_mtime"))
             if not unchanged:
-                encrypted = (self.folder / "backups" / latest["file"]).read_bytes()
+                encrypted = (self.backup_folder / latest["file"]).read_bytes()
                 atomic_write(destination, encrypted)
                 if destination.read_bytes() != encrypted:
                     raise OSError
@@ -550,7 +658,7 @@ class Controller:
         self.persist()
         try:
             send_backup(token, self.config["telegram_chat"], self.config["telegram_thread"],
-                        (self.folder / "backups" / latest["file"]).read_bytes(), latest, self.config.get('name', 'Штаб'))
+                        (self.backup_folder / latest["file"]).read_bytes(), latest, self.config.get('name', 'Штаб'))
             self.history.update(telegram_at=time.time(), telegram_snapshot_at=latest["created"], telegram_id=latest["id"], telegram_error=None)
             self.event("Telegram подтвердил приём зашифрованного архива. Восстановление проверяется отдельно.")
         except DeliveryError as exc:
@@ -564,7 +672,7 @@ class Controller:
         try:
             self.check()
             self.tunnel.check()
-            if (self.config.get('tunnel_desired') and self.config['desired'] and self.status['api'] and not self.tunnel.process
+            if (self.config.get('tunnel_desired') and self.config['desired'] and self.status['api'] and self.status['ui'] and not self.tunnel.process
                     and self.vault.unlocked and self.vault.get('fxtunnel')
                     and time.time()-getattr(self,'last_tunnel_attempt',0) >= 60 and getattr(self,'tunnel_attempts',0) < 3):
                 self.last_tunnel_attempt = time.time()

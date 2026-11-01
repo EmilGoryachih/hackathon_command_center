@@ -6,10 +6,10 @@ const assert=require('node:assert/strict');
 const {test}=require('node:test');
 const html=readFileSync(path.join(__dirname,'../static/index.html'),'utf8');
 const script=readFileSync(path.join(__dirname,'../static/panel.js'),'utf8');
-function fixture(){
+function fixture(configured=true){
   const dom=new JSDOM(html,{url:'http://127.0.0.1:8787',runScripts:'outside-only'}), w=dom.window;
   const calls=[];
-  const status={config:{id:'abc123',configured:true,desired:true,login:'actual-admin',data_dir:'D:/test',subdomain:'dots-bots-hub'},
+  const status={config:{id:'abc123',configured,desired:true,login:'actual-admin',data_dir:'D:/test',subdomain:'dots-bots-hub'},
     history:{records:[]},metrics:[],events:[],services:{},tunnel:{url:'https://dots-bots-hub.fxtun.ru'},
     installations:{main:'abc123',items:[{id:'abc123',name:'QA'}]},container:{State:'running'},api:true,ui:true};
   w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};
@@ -21,6 +21,22 @@ function fixture(){
   return {w,calls,status,$:id=>w.document.getElementById(id),close:()=>dom.window.close()};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
+test('common keys can be checked before creating a project',async()=>{
+  const f=fixture(false);await settle();
+  assert.equal(f.w.document.querySelector('[data-action="keys-check"]').disabled,false);
+  f.close();
+});
+test('shared key badges and clear events are available',async()=>{
+  const f=fixture();await settle();
+  f.status.keys={telegram:{status:'valid',detail:'API подтвердил ключ'},gemini:{status:'invalid',detail:'Ключ отклонён'},fxtunnel:{status:'missing',detail:'Ключ не задан'}};
+  f.w.document.querySelector('[data-action="check"]').click();await settle();
+  assert.ok(f.$('key-telegram').classList.contains('valid'));
+  assert.match(f.$('key-gemini').textContent,/некорректен/);
+  assert.match(f.$('key-fxtunnel').textContent,/не задан/);
+  f.$('clear-events').click();await settle();
+  assert.ok(f.calls.some(c=>c.url==='/api/events/clear'));
+  f.close();
+});
 test('scenario buttons have visible selection and existing scenario starts selected platform',async()=>{
   const f=fixture();await settle();
   f.$('scenario-new').click();

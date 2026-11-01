@@ -12,7 +12,7 @@ def test_start_enables_tunnel_and_tick_opens_once_api_ready(tmp_path, monkeypatc
     c.execute('start')
     assert c.config['tunnel_desired'] is True
     assert c.config['subdomain'] == 'dots-bots-hub'
-    monkeypatch.setattr(c,'check',lambda:c.status.update(api=True))
+    monkeypatch.setattr(c,'check',lambda:c.status.update(api=True, ui=True))
     monkeypatch.setattr(c,'backup',lambda:None)
     c.tunnel.check=Mock()
     c.tunnel.start=Mock()

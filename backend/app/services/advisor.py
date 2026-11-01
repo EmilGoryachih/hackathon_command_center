@@ -235,6 +235,17 @@ def provider_schema(model: type[AnalysisReply] | type[QuestionReply]) -> dict[st
     return simplify(model.model_json_schema())
 
 
+def provider_error_code(code: int | None, details: Any) -> str:
+    text = str(details).lower()
+    if any(value in text for value in ('api_key_invalid', 'api key not valid', 'api key expired', 'api_key_expired')):
+        return 'PROVIDER_AUTH'
+    if 'location is not supported' in text or 'region is not supported' in text:
+        return 'PROVIDER_REGION'
+    if code in (401, 403):
+        return 'PROVIDER_AUTH'
+    return 'PROVIDER_CONFIG' if code in (400, 404) else 'TEMPORARY'
+
+
 def gemini(cfg: AdvisorProviderSettings, kind: str, system: str, content: str) -> ProviderReply:
     """Exactly one SDK attempt. Never log raw exceptions, responses, thoughts or credentials."""
     try:
@@ -275,12 +286,8 @@ def gemini(cfg: AdvisorProviderSettings, kind: str, system: str, content: str) -
             # Quota details are inspected, never stored: distinguish daily exhaustion.
             details = str(getattr(exc, 'details', ''))
             reason = 'PROVIDER_DAILY_LIMIT' if 'perday' in details.lower() or 'per_day' in details.lower() else 'PROVIDER_RATE_LIMIT'
-        elif code in (401, 403):
-            reason = 'PROVIDER_AUTH'
-        elif code in (400, 404):
-            reason = 'PROVIDER_CONFIG'
         else:
-            reason = 'TEMPORARY'
+            reason = provider_error_code(code, {'details': getattr(exc, 'details', None), 'message': getattr(exc, 'message', '')})
         raise ProviderError(reason, wait) from None
 
 

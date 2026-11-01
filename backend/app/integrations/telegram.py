@@ -29,6 +29,8 @@ class TelegramClient:
             import urllib.request
             import urllib.error
             import socket
+            import ssl
+            import errno
             request = urllib.request.Request(f'https://api.telegram.org/bot{token}/sendMessage',
                 data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'}, method='POST')
             try:
@@ -40,6 +42,10 @@ class TelegramClient:
                 except (ValueError, OSError):
                     data = {'ok': False, 'error_code': exc.code}
             except urllib.error.URLError as exc:
+                if isinstance(exc.reason, ssl.SSLCertVerificationError):
+                    raise TelegramError('TLS_ERROR') from None
+                if isinstance(exc.reason, OSError) and exc.reason.errno in {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EACCES, 10013, 10051, 10065}:
+                    raise TelegramError('NETWORK_UNREACHABLE') from None
                 if isinstance(exc.reason, (ConnectionRefusedError, socket.gaierror)):
                     raise TelegramError('TEMPORARY', retry_after=5) from None
                 raise TelegramError('UNKNOWN_RESULT', uncertain=True) from None

@@ -13,6 +13,8 @@ from app.db.models import (TelegramSettings, TelegramDelivery, Project, User, Ta
 from app.integrations.telegram import TelegramError, telegram_client
 from app.telegram_schemas import normalize_username
 from app.timeutil import utcnow
+from app.config import settings
+import json
 
 EVENTS = {
     'task_assigned': 'Назначение задачи', 'task_overdue': 'Просрочка задачи',
@@ -37,6 +39,8 @@ ERRORS = {
     'CHAT_UNAVAILABLE': 'Чат недоступен или ID направления неверен',
     'RATE_LIMIT': 'Ограничение Telegram: повтор после задержки',
     'TEMPORARY': 'Временная ошибка Telegram или соединения',
+    'TLS_ERROR': 'Не удалось проверить TLS-сертификат Telegram. Проверьте сертификаты и HTTPS-прокси сервера; сообщение не отправлено',
+    'NETWORK_UNREACHABLE': 'Сеть Telegram недоступна серверу. Проверьте маршрут/VPN Windows и контейнера; сообщение не отправлено',
     'UNKNOWN_RESULT': 'Результат неизвестен: сообщение могло быть отправлено',
     'CONTENT_CHANGED': 'Доставка приостановлена после обезличивания аккаунта. Повтор всего сообщения может дублировать прежние части',
 }
@@ -85,9 +89,22 @@ def split_text(text: str) -> list[str]:
     return parts
 
 
+def project_config(db: Session, project_id: int) -> TelegramSettings | None:
+    cfg = db.get(TelegramSettings, project_id)
+    path = settings.data_dir / '.hub-settings.json'
+    if settings.app_managed and path.is_file():
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if cfg is None:
+            cfg = TelegramSettings(project_id=project_id, routes={}, public_url='')
+            db.add(cfg)
+        cfg.chat_id = data.get('telegram_chat') or None
+        db.flush()
+    return cfg
+
+
 def enqueue(db: Session, project_id: int, event_type: str, text: str, usernames: list[str],
             *, event_key: str | None = None, test_thread: int | None = None) -> TelegramDelivery | None:
-    cfg = db.get(TelegramSettings, project_id)
+    cfg = project_config(db, project_id)
     if not cfg or not cfg.chat_id:
         return None
     route = test_thread if event_type == 'test' else cfg.routes.get(event_type)

@@ -9,24 +9,25 @@ from typing import Any
 
 from control.archives import ArchiveError
 from control.controller import Controller
-from control.vault import atomic_write
+from control.vault import Vault, atomic_write
 
 
 class PlatformManager:
     # The server's existing maintenance routes delegate to the selected controller.
-    _owned = {'root', 'registry_file', 'registry', 'current', 'gate', 'stop_event'}
+    _owned = {'root', 'registry_file', 'registry', 'current', 'gate', 'stop_event', 'shared_vault'}
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self.shared_vault = Vault(self.root / '.control' / 'shared')
         self.registry_file = self.root / '.control' / 'installations.json'
         self.gate = threading.RLock()
         self.stop_event = threading.Event()
         if self.registry_file.exists():
             self.registry = json.loads(self.registry_file.read_text())
             entry = next((row for row in self.registry['items'] if row['id'] == self.registry['main']), None)
-            self.current = Controller(Path(entry['root']) if entry else self.root / '.control' / 'empty')
+            self.current = self._controller(Path(entry['root']) if entry else self.root / '.control' / 'empty')
         else:
-            self.current = Controller(self.root)
+            self.current = self._controller(self.root)
             self.registry = {'main': self.current.config['id'], 'items': []}
             if self.current.config['configured']:
                 self._register(self.current, 'Основная платформа')
@@ -35,6 +36,34 @@ class PlatformManager:
         selected = next((row for row in self.registry['items'] if row['id'] == self.current.config['id']), None)
         if selected:
             self.current.config['name'] = selected['name']
+            self._finish_local_split()
+        if self.shared_vault.unlocked:
+            # Preserve previously entered provider keys, including inactive projects.
+            for row in self.registry['items']:
+                previous = Vault(Path(row['root']) / '.control')
+                previous.bind_shared(self.shared_vault)
+
+    def _controller(self, root: Path) -> Controller:
+        controller = Controller(root)
+        if not controller.vault.windows and self.shared_vault.unlocked:
+            controller.vault.unlock(self.shared_vault.password or '')
+        controller.vault.bind_shared(self.shared_vault)
+        return controller
+
+    def _finish_local_split(self) -> None:
+        """Upgrade only copies produced by our local split, never imported restores."""
+        data = Path(self.config['data_dir']).resolve()
+        if 'local_split' in self.config or not self.config.get('restore_verified'):
+            return
+        identity = self.current.root.name
+        sources = self.registry.get('legacy_sources', [])
+        if (self.current.root.parent == (self.root / '.control' / 'platforms').resolve()
+                and data.name == 'aion-project-' + identity
+                and any(Path(row['data_dir']).resolve().parent == data.parent for row in sources)):
+            self._require_single_project()
+            (data / '.transfer-pending').unlink(missing_ok=True)
+            self.config.update(local_split=True, transfer_pending=False)
+            self.current.persist()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.current, name)
@@ -81,7 +110,7 @@ class PlatformManager:
                 raise ArchiveError('Выберите отдельную папку данных вне файлов хаба')
             import uuid
             state = self.root / '.control' / 'platforms' / uuid.uuid4().hex
-            candidate = Controller(state)
+            candidate = self._controller(state)
             # Windows vault opens with the current account; Linux requires explicit unlock.
             if not candidate.vault.windows:
                 if not self.current.vault.password:
@@ -108,9 +137,10 @@ class PlatformManager:
                 raise ArchiveError('Платформа не найдена в списке')
             if identity != self.current.config['id']:
                 self._stop_current()
-                candidate = Controller(Path(entry['root']))
+                candidate = self._controller(Path(entry['root']))
                 candidate.config['name'] = entry['name']
                 self.current = candidate
+                self._finish_local_split()
             self.registry['main'] = identity
             self._persist()
             if start:
@@ -131,7 +161,7 @@ class PlatformManager:
             entry = next((row for row in self.registry['items'] if row['id'] == identity), None)
             if entry is None or confirmation != entry['name']:
                 raise ArchiveError('Для удаления введите точное название проекта')
-            selected = self.current if identity == self.current.config['id'] else Controller(Path(entry['root']))
+            selected = self.current if identity == self.current.config['id'] else self._controller(Path(entry['root']))
             if selected.busy:
                 raise ArchiveError('Дождитесь завершения операции проекта')
             paths: list[Path] = []
@@ -189,7 +219,7 @@ class PlatformManager:
                     path.resolve().unlink()
             remaining = [row for row in self.registry['items'] if row['id'] != identity]
             if selected is self.current:
-                self.current = Controller(Path(remaining[0]['root']) if remaining else self.root / '.control' / 'empty')
+                self.current = self._controller(Path(remaining[0]['root']) if remaining else self.root / '.control' / 'empty')
                 self.current.config['desired'] = False
                 self.current.persist()
             self.registry['items'] = remaining
@@ -238,17 +268,20 @@ class PlatformManager:
                     from control.worker import suspend_external_actions
                     from datetime import datetime, timezone
                     suspend_external_actions(data, datetime.now(timezone.utc).isoformat())
+                    # The original is stopped on this same host; this is not a server transfer.
+                    # AI stays disabled and uncertain deliveries remain quarantined.
+                    (data / '.transfer-pending').unlink(missing_ok=True)
                     documents = source / 'documents' / str(project_id)
                     if documents.exists():
                         if documents.is_symlink() or any(p.is_symlink() for p in documents.rglob('*')):
                             raise ArchiveError('Ссылки в документах запрещены; исходник сохранён')
                         shutil.copytree(documents, data / 'documents' / str(project_id))
-                    candidate = Controller(self.root / '.control' / 'platforms' / identity)
+                    candidate = self._controller(self.root / '.control' / 'platforms' / identity)
                     if not candidate.vault.windows:
                         candidate.vault.unlock(original.vault.password or '')
                     candidate.setup(str(data), 'attach', original.config['login'])
                     candidate.config['name'] = name
-                    candidate.config.update(transfer_pending=True, restore_verified=True)
+                    candidate.config.update(transfer_pending=False, restore_verified=True, local_split=True)
                     candidate.persist()
                     candidates.append((candidate, name))
             # Publish only when every copy passed validation. The source remains intact.

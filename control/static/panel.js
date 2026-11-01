@@ -56,7 +56,7 @@ function renderServices(s){
   for(const [name,value] of Object.entries(s.services||{})){
     const button=document.createElement('button');button.type='button';button.className='service-tile';
     const icon=document.createElement('span');icon.className='service-logo';
-    if(name==='platform'){icon.textContent='⬡';}else{const img=document.createElement('img');img.src='/static/icons/'+name+'.png';img.alt='';icon.append(img);}
+    const img=document.createElement('img');img.src='/static/icons/'+(name==='platform'?'aion':name)+'.png';img.alt='';icon.append(img);
     const badge=document.createElement('span');badge.className='status-badge '+value.status;badge.textContent=symbols[value.status];badge.setAttribute('aria-label',labels[value.status]);
     icon.append(badge);const title=document.createElement('b');title.textContent=names[name];const subtitle=document.createElement('small');subtitle.textContent=labels[value.status];
     button.append(icon,title,subtitle);button.title=value.detail;
@@ -66,6 +66,13 @@ function renderServices(s){
 }
 function render(s) {
   state = s;
+  const keyLabels={locked:'Хранилище заблокировано',valid:'✓ Ключ задан и подтверждён',invalid:'× Ключ некорректен',blocked:'× Доступ запрещён',unknown:'? Ключ задан, не проверен',missing:'Ключ не задан'};
+  for(const name of ['telegram','gemini','fxtunnel']){
+    const key=s.keys?.[name]||{status:'unknown',detail:'Проверка не выполнялась'};
+    const label=$('key-'+name);label.textContent=keyLabels[key.status]||keyLabels.unknown;
+    label.className='key-state '+key.status;label.title=key.detail+(key.checked_at?' · '+stamp(key.checked_at):'');
+    if(key.restart_required){label.textContent+=' · нужен перезапуск Aion';label.classList.add('pending');}
+  }
   const c = s.config, h = s.history, latest = h.records.at(-1), metric = s.metrics.at(-1);
   if(renderedInstallation!==c.id){
     renderedInstallation=c.id;
@@ -118,7 +125,7 @@ function render(s) {
   text('data-folder', c.data_dir); text('disk-free', size(s.disk_free_bytes));
   text('autostart-toggle', 'Автозапуск: ' + (s.autostart ? 'включён · отключить' : 'выключен · включить'));
   if(s.dependencies) text('dependency-state', s.dependencies.phase || `WSL: ${s.dependencies.wsl === null ? 'не нужен' : s.dependencies.wsl ? 'готов' : 'нет'} · Ubuntu: ${s.dependencies.distro === null ? 'не нужна' : s.dependencies.distro ? 'готова' : 'нет'} · Docker: ${s.dependencies.docker ? 'установлен' : 'нет'} · Compose: ${s.dependencies.compose ? 'готов' : 'нет'} · шаг: ${s.dependencies.next}`);
-  text('local-backup-state', h.message || 'Копий пока нет');
+  text('local-backup-state', (h.message || 'Копий пока нет') + (s.backup_folder ? ' · '+s.backup_folder : ''));
   text('external-backup-state', h.external_error || (c.external_folder ? 'Последняя проверка: ' + stamp(h.external_at) : 'Не настроен'));
   text('telegram-backup-state', h.telegram_error || (h.telegram_at ? `Принято: ${stamp(h.telegram_at)}; снимок: ${stamp(h.telegram_snapshot_at)}` : c.telegram_chat ? 'Первая отправка ожидается' : 'Не настроен'));
   $('unlock-form').hidden=s.host_platform !== 'posix' || s.vault_unlocked;
@@ -144,7 +151,7 @@ function render(s) {
   if(!s.events.length) $('event-list').textContent='Событий пока нет';
   for(const button of document.querySelectorAll('[data-action]')){
     const action=button.dataset.action;
-    button.disabled=Boolean(s.busy)||(!c.configured && !['check','telegram-test'].includes(action))||(action==='tunnel-start'&&!ready);
+    button.disabled=Boolean(s.busy)||(!c.configured && !['check','telegram-test','keys-check'].includes(action))||(action==='tunnel-start'&&!c.desired);
     button.title=button.disabled?(s.busy?'Дождитесь завершения текущей операции':!c.configured?'Сначала создайте или выберите платформу':'Сначала дождитесь готовности платформы'):'';
   }
 }
@@ -152,7 +159,7 @@ async function refresh() { try { render(await api('status',undefined,'GET')); } 
 for(const button of document.querySelectorAll('[data-action]')) button.addEventListener('click', async()=>{ try { await api('action/'+button.dataset.action); message('Операция запущена. Состояние и результат появятся в панели.'); await refresh(); } catch(error) { message(error.message,true); } });
 $('setup-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('setup',Object.fromEntries(new FormData(event.target)));message('Установка подготовлена. Сохраните ключ оператора, соберите образ и нажмите «Старт».');await refresh();}catch(error){message(error.message,true);}});
 $('unlock-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('unlock',Object.fromEntries(new FormData(event.target)));event.target.reset();await refresh();}catch(error){message(error.message,true);}});
-$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{data.clear_keys=['telegram','gemini'].filter(name=>data['clear_'+name]==='on');delete data.clear_telegram;delete data.clear_gemini;const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.gemini.value='';event.target.elements.clear_telegram.checked=false;event.target.elements.clear_gemini.checked=false;message(result.message);await refresh();}catch(error){message(error.message,true);}});
+$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{data.clear_keys=['telegram','gemini'].filter(name=>data['clear_'+name]==='on');delete data.clear_telegram;delete data.clear_gemini;const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.gemini.value='';event.target.elements.clear_telegram.checked=false;event.target.elements.clear_gemini.checked=false;message(result.message);await refresh();await api('action/keys-check');}catch(error){message(error.message,true);}});
 $('show-key').addEventListener('click',async()=>{
   try{
     const data=await api('operator');
@@ -181,7 +188,7 @@ $('activate').addEventListener('click',async()=>{try{await api('transfer/activat
 $('check-dependencies').addEventListener('click',async()=>{try{message('Проверяем компоненты…');await api('dependencies/check');await refresh();}catch(error){message(error.message,true);}});
 $('install-dependencies').addEventListener('click',async()=>{try{await api('dependencies/install');message('Шаг установки запущен. Прогресс и необходимые действия появятся в панели.');}catch(error){message(error.message,true);}});
 $('autostart-toggle').addEventListener('click',async()=>{try{await api('autostart',{enabled:!state.autostart});await refresh();}catch(error){message(error.message,true);}});
-$('tunnel-form').addEventListener('submit',async event=>{event.preventDefault();try{const data=Object.fromEntries(new FormData(event.target));data.clear_key=data.clear_key==='on';await api('tunnel/settings',data);event.target.elements.fxtunnel.value='';event.target.elements.clear_key.checked=false;message('Секрет и имя сохранены. Откройте туннель отдельной кнопкой.');}catch(error){message(error.message,true);}});
+$('tunnel-form').addEventListener('submit',async event=>{event.preventDefault();try{const data=Object.fromEntries(new FormData(event.target));data.clear_key=data.clear_key==='on';await api('tunnel/settings',data);event.target.elements.fxtunnel.value='';event.target.elements.clear_key.checked=false;await refresh();await api('action/keys-check');message('Общий ключ и поддомен сохранены. Проверяем ключи; туннель откроется после готовности Aion.');}catch(error){message(error.message,true);}});
 $('copy-link').addEventListener('click',()=>{if(state?.tunnel?.url) navigator.clipboard.writeText(state.tunnel.url).then(()=>message('Действующая ссылка скопирована'));});
 $('new-platform-form').addEventListener('submit',async event=>{
   event.preventDefault();const button=event.target.querySelector('button.primary');button.disabled=true;
@@ -227,3 +234,5 @@ $('confirm-delete-project').addEventListener('click',async()=>{
   try{await api('platforms/delete',{identity:deleteTarget.id,confirmation:$('delete-confirmation').value,delete_data:$('delete-data').checked});$('delete-dialog').close();deleteTarget=null;restoreTicket=null;await refresh();message('Проект удалён из списка. Другой проект не запускался.');}
   catch(error){text('delete-error',error.message);$('confirm-delete-project').disabled=false;}
 });
+
+$('clear-events').addEventListener('click',async()=>{try{await api('events/clear');await refresh();}catch(error){message(error.message,true);}});

@@ -30,6 +30,37 @@ def test_existing_managed_admin_gets_initial_project(client, monkeypatch):
         assert db.query(BoardColumn).count() > 0
 
 
+def test_managed_health_requires_usable_project(client, monkeypatch):
+    from tests.conftest import TestingSessionLocal
+    from app.db.models import BoardColumn, Project
+    from control import VERSION
+    monkeypatch.setattr(settings, 'app_managed', True)
+    monkeypatch.setattr('app.services.portable.storage_ready', lambda: True)
+    ready = client.get('/health')
+    assert ready.status_code == 200
+    assert ready.json()['version'] == VERSION
+    assert ready.json()['project_id'] == 1
+    with TestingSessionLocal() as db:
+        db.query(BoardColumn).delete()
+        db.commit()
+    assert client.get('/health').status_code == 503
+    with TestingSessionLocal() as db:
+        db.query(Project).delete()
+        db.commit()
+    assert client.get('/health').json()['reason'] == 'project'
+
+
+def test_managed_health_requires_active_administrator(client, monkeypatch):
+    from tests.conftest import TestingSessionLocal
+    from app.db.models import User
+    monkeypatch.setattr(settings, 'app_managed', True)
+    monkeypatch.setattr('app.services.portable.storage_ready', lambda: True)
+    with TestingSessionLocal() as db:
+        db.query(User).update({'active': False})
+        db.commit()
+    assert client.get('/health').status_code == 503
+
+
 def test_split_real_schema_keeps_project_and_passwords(client, tmp_path):
     from pathlib import Path
     import sqlite3
@@ -73,4 +104,7 @@ def test_manager_splits_complete_schema(client, tmp_path, monkeypatch):
         with sqlite3.connect(Path(entry['data_dir']) / 'hackathon.db') as db:
             assert db.execute('SELECT count(*) FROM projects').fetchone()[0] == 1
             assert not db.execute('PRAGMA foreign_key_check').fetchall()
-        assert (Path(entry['data_dir']) / '.transfer-pending').exists()
+        assert not (Path(entry['data_dir']) / '.transfer-pending').exists()
+        from control.controller import Controller
+        manager.current = Controller(Path(entry['root']))
+        assert not manager.config['transfer_pending']

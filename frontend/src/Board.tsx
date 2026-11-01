@@ -264,7 +264,7 @@ export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affec
       onClick={onOpen}
       style={{ opacity: dragging ? 0.5 : 1 }}
     >
-      <div className="task-title" style={{ fontWeight: 500, fontSize: 13 }}>{task.title}<IncidentMark incidents={blockers}/></div>
+      <div className="task-title" style={{ fontWeight: 500, fontSize: 13 }}><span className="muted">#{task.id} </span>{task.title}<IncidentMark incidents={blockers}/></div>
       <small className="task-readiness">{TONE_LABELS[taskTone(task,tasks)]}</small>
       <div className="row" style={{ marginTop: 6, fontSize: 12, flexWrap: 'wrap' }}>
         {blocked && <span className={`badge ${blockKind}`}>заблокирована{blockKind==='purple'?' · Ожидает подтверждения':''}</span>}

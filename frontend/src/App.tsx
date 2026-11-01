@@ -12,8 +12,8 @@ import {PlanningPreviewHost} from './PlanningPreview'
 type Tab = 'board' | 'planning' | 'incidents' | 'analytics' | 'admin' | 'settings'
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'board', label: 'Agora · Доска' },
-  { key: 'planning', label: 'Chronos · Планирование' },
+  { key: 'board', label: 'Доска' },
+  { key: 'planning', label: 'Планирование' },
   { key: 'incidents', label: 'Инциденты' },
   { key: 'analytics', label: 'Аналитика' },
   { key: 'admin', label: 'Админ' },
@@ -95,11 +95,12 @@ export default function App() {
     setProjectsLoaded(false)
     setMe(user)
   }} />
+  if (!projectsLoaded) return <div style={{ padding: 24 }}>Загрузка проекта Aion…</div>
 
   const isAdmin = me.roles.some((r) => r.role === 'admin')
   const unread = notifications.filter((n) => !n.read_at).length
 
-  if (projectsLoaded && projects.length === 0 && !isAdmin) return (
+  if (projectsLoaded && projects.length === 0 && (!isAdmin || me.managed)) return (
     <div className="card" style={{margin:24}}>
       Нет доступных проектов. Попросите администратора назначить роль в проекте.
       <button onClick={async () => { await api.logout(); setMe(null); setProjectsLoaded(false) }}>Выйти</button>

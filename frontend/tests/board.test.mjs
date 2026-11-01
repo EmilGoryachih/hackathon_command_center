@@ -13,10 +13,11 @@ const columns = [{id:1,key:'backlog',title:'Очередь'}, {id:2,key:'custom'
 
 test('task card uses real project columns including custom titles', () => {
   const html = renderToStaticMarkup(createElement(module.exports.TaskCard, {
-    task:{title:'Task',column_key:'custom',assignees:[],tags:[],priority:'medium'}, columns,
+    task:{id:42,title:'Task',column_key:'custom',assignees:[],tags:[],priority:'medium'}, columns,
   }))
   assert.match(html, /value="custom" selected="">Моя колонка/)
   assert.doesNotMatch(html, /value="testing"/)
+  assert.match(html, /#42 /)
 })
 
 test('new task form offers custom project columns', () => {
