@@ -52,7 +52,7 @@ export function TelegramSettings({isAdmin}:{isAdmin:boolean}) {
           <option value="off">Выключено</option><option value="general">Общий чат</option><option value="topic">Тема по ID</option>
         </select>{route!=null&&route>0&&<input aria-label={`ID темы: ${label}`} type="number" min="1" max="2147483647" value={route} onChange={e=>setRoutes({...routes,[key]:Number(e.target.value)})}/>}</div>
       })}</div>
-      <p className="muted">Отдельные рекомендации ИИ могут дублировать полный отчёт, если включены оба маршрута. Без выбранного маршрута отправки нет.</p>
+      <p className="muted">Анализатор: появление, изменение, разрешение, повторное появление и напоминание маршрутизируются отдельно. Выключенный маршрут не скрывает ситуацию в аналитике.</p>
       <button className="primary" disabled={busy||!dirty} onClick={()=>{
         const changed=chat.trim()!==(saved.chat_id||'')
         if(changed&&!confirm(`Подтвердить чат ${chat||'не выбран'} для проекта #${project}? Ожидающие сообщения сохранят старые направления.`))return

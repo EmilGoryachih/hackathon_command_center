@@ -1,14 +1,13 @@
-import { useEffect } from 'react'
-import { api, Analytics as AnalyticsData, Me, currentProject, SummaryTask } from './api'
+import { useEffect, useState } from 'react'
+import { api, Analytics as AnalyticsData, Me, SummaryTask, Situation } from './api'
 import { useProjectUpdates } from './realtime'
-import { Advisor } from './Advisor'
+import { SituationCard } from './Situations'
 import { Badge, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad, incidentKind, incidentLabel } from './ui'
 
-export function Analytics({ me, onOpenTask, onOpenIncident, onPlanning }: {
+export function Analytics({ me: _me, onOpenTask, onOpenIncident, onPlanning }: {
   me: Me; onOpenTask:(id:number)=>void; onOpenIncident:(id:number)=>void; onPlanning:()=>void
 }) {
   const [data, error, reload] = useLoad<AnalyticsData>(api.analytics)
-  const isCaptain = me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === currentProject()))
   useProjectUpdates(reload)
   useEffect(() => {
     const id = setInterval(reload, 60000)
@@ -25,19 +24,18 @@ export function Analytics({ me, onOpenTask, onOpenIncident, onPlanning }: {
       {error&&<div className="error" role="alert">Не удалось обновить: {error}. Показан последний успешный снимок; время и таймеры относятся к нему.</div>}
       <AnalyticsMetrics data={data}/>
       <button className="small" onClick={onPlanning}>Открыть планирование</button>
-      <OperationalSections summary={s} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident}/>
+      <OperationalSections summary={s} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>
       <details className="card"><summary>Подробности по времени</summary>
         <p>Фактическое время таймеров задач вне корзины: {fmt(data.kpi.actual_seconds)}. Это отдельная метрика; она не уменьшает незавершённую длительность.</p>
         <h4>Время задач, закреплённых за основным исполнителем</h4>
         {data.time_by_user.map(t=><p key={t.user_id??'none'}>{t.display_name}: {fmt(t.seconds)}</p>)}
         <p className="muted">Время общих задач не делится между участниками и не отражает личное отработанное время.</p>
       </details>
-      <Advisor canManage={isCaptain&&s.project_state!=='completed'} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>
     </div>
   )
 }
 
-export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summary:AnalyticsData['summary'];onOpenTask:(id:number)=>void;onOpenIncident:(id:number)=>void}) {
+export function OperationalSections({summary:s,onOpenTask,onOpenIncident,onPlanning}:{summary:AnalyticsData['summary'];onOpenTask:(id:number)=>void;onOpenIncident:(id:number)=>void;onPlanning?:()=>void}) {
   const taskList=(ids:number[]) => <TaskList tasks={ids.map(id=>s.tasks.find(t=>t.id===id)).filter((t):t is SummaryTask=>!!t)} onOpen={onOpenTask} onIncident={onOpenIncident}/>
   const nearest=(ids:number[])=>{
     const tasks=s.tasks.filter(t=>ids.includes(t.id)&&t.availability!=='done').sort((a,b)=>(a.deadline??'9999').localeCompare(b.deadline??'9999')).slice(0,2)
@@ -50,7 +48,7 @@ export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summa
     <section className="card"><h3>Участники и нагрузка</h3>
       <p className="muted">В работе: 1 — зелёный, 2 — жёлтый, 0 или 3+ — красный. Доступны: 0 — красный, 1+ — зелёный. Ожидают: 0–3 — зелёный, 4+ — красный. Инциденты и пересечения: 0 — зелёный, 1+ — красный.</p>
       <div className="workload-scroll" role="region" aria-label="Таблица нагрузки участников" tabIndex={0}><table className="workload-table"><thead><tr><th scope="col">Участник</th><th scope="col">В работе</th><th scope="col">Доступны</th><th scope="col">Ожидают</th><th scope="col">Инциденты</th><th scope="col">Пересечения</th><th scope="col">Ближайшие задачи и сроки (МСК)</th></tr></thead><tbody>
-      {s.participants.map(p=><tr key={p.id} id={`advisor-user-${p.id}`}><th scope="row">{p.display_name}<div><Badge kind={badgeForStatus(p.traffic_status)}>{{green:'Нет прямых инцидентов',yellow:'Жёлтый блокер',red:'Красный блокер',purple:'Ожидает подтверждения'}[p.traffic_status]}</Badge></div></th>
+      {s.participants.map(p=><tr key={p.id} id={`participant-${p.id}`}><th scope="row">{p.display_name}<div><Badge kind={badgeForStatus(p.traffic_status)}>{{green:'Нет прямых инцидентов',yellow:'Жёлтый блокер',red:'Красный блокер',purple:'Ожидает подтверждения'}[p.traffic_status]}</Badge></div></th>
         <td><WorkloadValue label="В работе" value={p.active_ids.length} tone={p.active_ids.length===1?'good':p.active_ids.length===2?'warn':'bad'} hint={p.active_ids.length?'есть активные задачи':'нет активных задач'}/></td>
         <td><WorkloadValue label="Доступны" value={p.ready_ids.length} tone={p.ready_ids.length?'good':'bad'} hint={p.ready_ids.length?'можно взять в работу':'нет доступных задач'}/></td>
         <td><WorkloadValue label="Ожидают" value={p.waiting_ids.length} tone={p.waiting_ids.length>3?'bad':'good'} hint={p.waiting_ids.length?'ожидают зависимостей':'нет ожидания'}/></td>
@@ -60,10 +58,12 @@ export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summa
       </tbody></table></div>{!s.participants.length&&<p className="muted">Нет участников</p>}
       <div className="overlap-pairs">{s.participants.flatMap(p=>overlaps(p.overlaps).map((ids,index)=><div className="overlap-pair" key={`${p.id}-${index}`}><strong>{p.display_name}</strong>{ids.map(id=>{const task=s.tasks.find(t=>t.id===id)!;return <span key={id}> — <button className="small" onClick={()=>onOpenTask(id)}>#{id} {task.title}</button></span>})}</div>))}</div>
     </section>
-    <details className="card attention-section"><summary>Что требует внимания <span className="muted">{s.attention.length}</span></summary>
-      {!s.attention.length&&<p className="tone-good">Выявленных проблем нет</p>}
+    <details className="card attention-section"><summary>Что требует внимания <span className="muted">{(s.situations??[]).length}</span></summary>
+      {!(s.situations??[]).length&&<p className="tone-good">Выявленных проблем нет</p>}
       {s.plan.incomplete&&<p className="muted">Данные неполны: отсутствие выявленных проблем не означает, что план полностью проверен.</p>}
-      <div className="attention-grid">{s.attention.map((a,i)=><article className="attention-item" key={i}><strong>{a.reason}</strong><div className="scan-actions">{a.task_ids.map(id=><button className="small" key={id} onClick={()=>onOpenTask(id)}>Задача #{id}</button>)}{a.incident_id&&<button className="small" onClick={()=>onOpenIncident(a.incident_id!)}>Открыть инцидент</button>}</div></article>)}</div>
+      <div className="attention-grid">{(s.situations??[]).map(item=><SituationCard key={item.id} item={item} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>)}</div>
+      <ResolvedSituations activeIds={(s.situations??[]).map(i=>i.id)} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident}/>
+      <details><summary>Подробности влияния открытых инцидентов ({s.incidents.length})</summary>
       <h4>Влияние открытых инцидентов ({s.incidents.length})</h4>
       <div className="scan-grid">{s.incidents.map(i=><article className={`scan-card incident-impact ${i.level==='red'?'is-red':''}`} key={i.id}>
         <div className="scan-heading"><button onClick={()=>onOpenIncident(i.id)}>#{i.number} {i.title}</button><Badge kind={i.level==='red'?'red':'yellow'}>{incidentLabel(i)} · {i.status==='confirmed'?'подтверждён':'открыт'}</Badge></div>
@@ -73,14 +73,23 @@ export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summa
         {i.targets.filter(t=>t.target_type!=='task').map(t=><p key={`${t.target_type}-${t.target_id}`}>{t.target_type==='module'?'Трек':'Участник'}: {t.target_type==='module'?s.tracks.find(x=>x.id===t.target_id)?.name:s.participants.find(x=>x.id===t.target_id)?.display_name}</p>)}
         {i.limitations.map((l,j)=><p className="muted" key={j}>{l}</p>)}
       </article>)}</div>
+      </details>
     </details>
-    <section className="card"><h3>Треки</h3><div className="scan-grid">{s.tracks.map(track=><article className="scan-card" key={track.id??'none'} id={`advisor-track-${track.id}`}>
+    <section className="card"><h3>Треки</h3><div className="scan-grid">{s.tracks.map(track=><article className="scan-card" key={track.id??'none'} id={`track-${track.id}`}>
       <h4>{track.name}</h4><ProgressLine label={`Прогресс трека ${track.name}`} value={track.percent} color="var(--ok)"/><p className="muted">Завершено {track.done} из {track.total} задач</p>
       <div className="scan-stats">{stat('В работе',track.active)}{stat('Ожидают',track.waiting,track.waiting?'warn':'good')}{stat('Просрочено',track.overdue,track.overdue?'bad':'good')}{stat('С препятствиями',track.blocked,track.blocked?'bad':'good')}{stat('Инциденты',track.incident_ids.length,track.incident_ids.length?'bad':'good')}{stat('Не назначен исполнитель',s.tasks.filter(t=>track.task_ids.includes(t.id)&&!t.assignees.length).length,s.tasks.some(t=>track.task_ids.includes(t.id)&&!t.assignees.length)?'bad':'good')}</div>
       {nearest(track.task_ids)}
       <div className="scan-actions">{incidentLinks(track.incident_ids)}</div><details className="track-tasks"><summary>Задачи трека ({track.task_ids.length})</summary>{taskList(track.task_ids)}</details>
     </article>)}</div></section>
   </>
+}
+
+function ResolvedSituations({activeIds,onOpenTask,onOpenIncident}:{activeIds:string[];onOpenTask:(id:number)=>void;onOpenIncident:(id:number)=>void}) {
+  const [items,setItems]=useState<Situation[]>([])
+  const [error,setError]=useState('')
+  const load=()=>{api.situationHistory().then(setItems).catch(e=>setError(e.message))}
+  const visible=items.filter(i=>!activeIds.includes(i.id))
+  return <details onToggle={e=>{if(e.currentTarget.open)load()}}><summary>Недавно разрешённые ситуации</summary>{error&&<p role="alert">{error}</p>}{!visible.length&&<p className="muted">Сохранённых разрешённых ситуаций нет.</p>}{visible.map(item=><SituationCard key={item.id} item={item} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident}/>)}</details>
 }
 
 function WorkloadValue({label,value,tone,hint}:{label:string;value:number;tone:'good'|'bad'|'warn'|'neutral';hint:string}) {

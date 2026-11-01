@@ -31,7 +31,7 @@ def test_project_list_and_object_access(client):
 def test_captain_does_not_gain_rights_in_other_project(client):
     setup_projects(client)
     login(client, 'member', 'test')
-    assert client.patch('/api/v1/projects/1/ai/settings', json={'enabled': True}).status_code == 403
+    assert client.put('/api/v1/projects/1/situations/settings', json={'enabled': True}).status_code == 403
     assert client.patch('/api/v1/projects/1', json={'name': 'Stolen'}).status_code == 403
 
 

@@ -81,7 +81,7 @@ def test_progress_excludes_trash_and_does_not_consume_estimates(client):
     assert client.get('/api/v1/projects/1/analytics').json()['kpi']['actual_seconds'] == 9000
 
 
-def test_plan_and_ai_share_summary_and_boundaries(client):
+def test_plan_and_situations_share_summary_and_boundaries(client):
     login(client)
     t, l = task(client), lane(client)
     place(client, t, l, start='2030-01-01T08:00:00')
@@ -91,12 +91,7 @@ def test_plan_and_ai_share_summary_and_boundaries(client):
     assert s['plan']['finish'] == state(client)['forecast']['finish']
     assert s['plan']['status'] == 'on_track'
     assert any(p['code'] == 'before_start' for p in s['attention'])
-    from tests.conftest import TestingSessionLocal
-    from app.services.ai import build_snapshot
-    with TestingSessionLocal() as db:
-        ai = build_snapshot(db, 1)['analytics_summary']
-    assert ai['plan'] == s['plan']
-    assert ai['progress'] == s['progress']
+    assert 'situations' in s
     task(client, 'Unplaced')
     assert summary(client)['plan']['status'] == 'incomplete'
 

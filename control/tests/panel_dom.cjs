@@ -31,7 +31,7 @@ test('shared key badges and clear events are available',async()=>{
   f.status.keys={telegram:{status:'valid',detail:'API подтвердил ключ'},gemini:{status:'invalid',detail:'Ключ отклонён'},fxtunnel:{status:'missing',detail:'Ключ не задан'}};
   f.w.document.querySelector('[data-action="check"]').click();await settle();
   assert.ok(f.$('key-telegram').classList.contains('valid'));
-  assert.match(f.$('key-gemini').textContent,/некорректен/);
+  assert.equal(f.$('key-gemini'), null);
   assert.match(f.$('key-fxtunnel').textContent,/не задан/);
   f.$('clear-events').click();await settle();
   assert.ok(f.calls.some(c=>c.url==='/api/events/clear'));

@@ -44,14 +44,10 @@ def test_full_cycle(client):
     doc = client.post("/api/v1/projects/1/documents", json={"path": "notes.md", "content": "# Notes"}).json()
     client.put(f"/api/v1/documents/{doc['id']}/content", json={"content": "# Notes v2", "base_checksum": doc["checksum"]})
 
-    # 6. Дашборд и ИИ.
-    assert client.get("/api/v1/projects/1/dashboard").status_code == 200
-    client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True})
-    # No real key is provisioned in this isolated integration test.
-    from unittest.mock import patch
-    with patch('app.services.advisor.vault.is_saved', return_value=False):
-        response = client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"})
-    assert response.status_code == 409 and response.json()['error']['code'] == 'KEY_MISSING'
+    # 6. Dashboard and provider-free situations.
+    assert client.get('/api/v1/projects/1/dashboard').status_code == 200
+    assert client.put('/api/v1/projects/1/situations/settings', json={'enabled':True}).status_code == 200
+    assert isinstance(client.get('/api/v1/projects/1/analytics').json()['summary']['situations'], list)
 
     # 7. Бэкап и восстановление.
     bid = client.post("/api/v1/admin/backups").json()["id"]
@@ -59,6 +55,7 @@ def test_full_cycle(client):
     assert client.post(f"/api/v1/admin/backups/{bid}/restore", json={"confirm": True}).status_code == 200
 
     # 8. Завершение (участник не голосует; капитаны единогласно).
+    login(client)
     titles = [t["title"] for t in client.get("/api/v1/projects/1/tasks").json()]
     assert "Лишняя" not in titles  # восстановление вернуло состояние до «Лишняя»
 

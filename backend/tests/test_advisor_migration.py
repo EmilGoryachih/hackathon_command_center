@@ -22,5 +22,5 @@ def test_populated_database_upgrade(tmp_path):
     upgrade('head')
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT summary,content,excluded,status FROM ai_recommendations').fetchone() == ('Keep summary','Keep history',1,'unreviewed')
-        assert db.execute('SELECT prompt,enabled,auto_enabled FROM ai_settings').fetchone() == ('Keep prompt',1,0)
+        assert db.execute('SELECT prompt,enabled,auto_enabled FROM ai_settings').fetchone() == ('Keep prompt',0,0)
         assert db.execute('SELECT rpd FROM advisor_provider_settings').fetchone() == (500,)

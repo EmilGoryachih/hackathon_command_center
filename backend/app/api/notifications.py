@@ -22,6 +22,9 @@ def open_notification(notification_id: int, db: Session = Depends(get_db), user:
     kinds = {'task_assigned':('task', Task), 'task_overdue':('task', Task),
              **{key:('incident', Incident) for key in ('incident_yellow_created','incident_red_created','incident_red_confirmed','incident_resolved')}}
     kind = kinds.get(notification.type)
+    if notification.type.startswith('situation_'):
+        kind = ('task', Task) if notification.payload.get('task_id') else (
+            ('incident', Incident) if notification.payload.get('incident_id') else None)
     target, message = None, 'Для этого уведомления переход не предусмотрен'
     if kind:
         entity_type, model = kind

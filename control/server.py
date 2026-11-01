@@ -39,7 +39,7 @@ class UnlockRequest(BaseModel):
 
 
 class SettingsRequest(BaseModel):
-    clear_keys: list[Literal['telegram', 'gemini']] = Field(default_factory=list)
+    clear_keys: list[Literal['telegram']] = Field(default_factory=list)
     external_folder: str = Field(default="", max_length=2048)
     telegram_chat: str = Field(default="", pattern=r"^-?\d{1,24}$|^$")
     telegram_thread: int | None = Field(default=None, gt=0)
@@ -47,7 +47,6 @@ class SettingsRequest(BaseModel):
     telegram_alert_thread: int | None = Field(default=None, gt=0)
     administrator: str = Field(default='', pattern=r'^@?[A-Za-z0-9_]{5,32}$|^$')
     telegram: str = Field(default="", max_length=256)
-    gemini: str = Field(default="", max_length=4096)
 
 
 class TunnelRequest(BaseModel):
@@ -63,7 +62,6 @@ class RestoreRequest(BaseModel):
 
 class ActivationRequest(BaseModel):
     previous_server_stopped: bool = False
-    accept_quota_pause: bool = False
 
 
 class AutostartRequest(BaseModel):
@@ -260,7 +258,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
             folder = Path(body.external_folder).expanduser().resolve()
             if not folder.is_dir() or folder.is_relative_to(Path(controller.config["data_dir"]).resolve()) or folder.is_relative_to(controller.folder):
                 raise ArchiveError("Выберите существующую отдельную папку внешних копий вне данных и панели")
-        for name in ("telegram", "gemini"):
+        for name in ("telegram",):
             value = getattr(body, name).strip()
             if name in body.clear_keys:
                 controller.vault.put(name, '')
@@ -382,8 +380,8 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
 
     @app.post("/api/transfer/activate")
     def activate(body: ActivationRequest):
-        if not body.previous_server_stopped or not body.accept_quota_pause:
-            raise ArchiveError("Подтвердите остановку прежней установки и паузу ИИ на 24 часа")
+        if not body.previous_server_stopped:
+            raise ArchiveError("Подтвердите остановку прежней установки; уведомления анализатора включаются отдельно")
         if not controller.config.get("restore_verified"):
             raise ArchiveError("Восстановление не завершилось успешно. Повторите проверку и восстановление архива перед активацией.")
         controller.docker.helper("transfer")

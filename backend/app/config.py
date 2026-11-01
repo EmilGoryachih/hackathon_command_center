@@ -36,14 +36,11 @@ class Settings(BaseSettings):
     # Внешние интеграции (этап 6+; до передачи ключей — моки).
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    ai_gemini_api_key: str = ""
-    ai_deepseek_api_key: str = ""
-    ai_priority_provider: str = "gemini"
     google_drive_folder_id: str = ""
     fxtunnel_token: str = ""
 
     def secret_value(self, name: str) -> str:
-        if name not in {"operator", "bootstrap_password", "gemini", "telegram"} or not self.app_secrets_dir:
+        if name not in {"operator", "bootstrap_password", "telegram"} or not self.app_secrets_dir:
             return ""
         path = Path(self.app_secrets_dir) / name
         return path.read_text(encoding="utf-8").strip() if path.is_file() else ""

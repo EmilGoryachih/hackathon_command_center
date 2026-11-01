@@ -520,6 +520,37 @@ class TelegramSettings(Base):
     public_url: Mapped[str] = mapped_column(String(500), default='')
 
 
+class SituationConfig(Base):
+    __tablename__ = 'situation_settings'
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    near_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    reminder_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    mention_captains: Mapped[bool] = mapped_column(Boolean, default=True)
+    mention_participants: Mapped[bool] = mapped_column(Boolean, default=True)
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SituationState(Base):
+    __tablename__ = 'situation_states'
+    __table_args__ = (UniqueConstraint('project_id', 'situation_key', name='uq_project_situation'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), index=True)
+    situation_key: Mapped[str] = mapped_column(String(120))
+    situation_type: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(16), default='active')
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSON)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    changed_at: Mapped[datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    last_event_at: Mapped[datetime] = mapped_column(DateTime)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivery_issue: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class CompletionVote(Base):
     __tablename__ = "completion_votes"
     __table_args__ = (UniqueConstraint("project_id", "user_id", "action", name="uq_completion_vote"),)

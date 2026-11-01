@@ -22,7 +22,7 @@ def _path() -> Path:
         raise VaultUnavailable('Защищённое хранилище Windows недоступно')
     import hashlib
     instance = hashlib.sha256(str(settings.data_dir.resolve()).encode()).hexdigest()[:16]
-    return Path(root) / 'HackathonCommandCenter' / instance / 'gemini.dpapi'
+    return Path(root) / 'HackathonCommandCenter' / instance / 'telegram.dpapi'
 
 
 class Blob(ctypes.Structure):
@@ -42,51 +42,11 @@ def _crypt(value: bytes, *, decrypt: bool = False) -> bytes:
     if decrypt:
         ok = crypt32.CryptUnprotectData(ctypes.byref(incoming), None, None, None, None, 1, ctypes.byref(outgoing))
     else:
-        ok = crypt32.CryptProtectData(ctypes.byref(incoming), 'Gemini API', None, None, None, 1, ctypes.byref(outgoing))
+        ok = crypt32.CryptProtectData(ctypes.byref(incoming), 'Aion secret', None, None, None, 1, ctypes.byref(outgoing))
     if not ok:
         raise VaultUnavailable('DPAPI не смог открыть хранилище для текущей учётной записи')
     try:
         return ctypes.string_at(outgoing.data, outgoing.size)
     finally:
         kernel32.LocalFree(outgoing.data)
-
-
-def is_saved() -> bool:
-    if settings.app_secrets_dir:
-        return bool(settings.secret_value('gemini'))
-    try:
-        return _path().is_file()
-    except VaultUnavailable:
-        return False
-
-
-def save(secret: str) -> None:
-    if settings.app_secrets_dir:
-        raise VaultUnavailable('Измените ключ через локальную панель управления')
-    if not secret.strip() or len(secret) > 4096:
-        raise VaultUnavailable('Ключ пустой или слишком длинный')
-    encrypted = _crypt(secret.strip().encode('utf-8'))
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix('.pending')
-    temp.write_bytes(encrypted)
-    temp.replace(path)
-
-
-def load() -> str:
-    if settings.app_secrets_dir:
-        value = settings.secret_value('gemini')
-        if not value:
-            raise VaultUnavailable('Ключ Gemini не задан в локальной панели')
-        return value
-    try:
-        return _crypt(_path().read_bytes(), decrypt=True).decode('utf-8')
-    except (OSError, UnicodeError) as exc:
-        raise VaultUnavailable('Ключ не задан или хранилище недоступно') from None
-
-
-def delete() -> None:
-    if settings.app_secrets_dir:
-        raise VaultUnavailable('Удалите ключ через локальную панель управления')
-    _path().unlink(missing_ok=True)
 

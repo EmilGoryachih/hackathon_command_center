@@ -134,7 +134,7 @@ def run_scenario(
     try:
         try:
             if body.scenario == 'full_check' or group is not None or body.scenario == 'integration_failure':
-                checks = run_checks('ai' if body.scenario == 'integration_failure' else group)
+                checks = run_checks('situations' if body.scenario == 'integration_failure' else group)
                 ok = all(c.status == 'passed' for c in checks)
                 logs = ['Изолированная временная БД. Рабочие проекты, аккаунты и файлы не изменялись.']
             else:

@@ -140,50 +140,12 @@ export interface Notification {
   created_at: string
 }
 
-export interface AiSettings {
-  enabled: boolean
-  priority_provider: string
-  prompt: string
-  interval_minutes: number
-  triggers: Record<string, boolean>
-  auto_enabled: boolean
-  next_run_at: string | null
+export interface Situation {
+  id:string;project_id:number;type:string;status:'active'|'resolved';level:'attention'|'check';title:string;text:string;suggestion:string|null;
+  task_ids:number[];incident_ids:number[];user_ids:number[];track_ids:number[];grounds:string[];limitations:string[];evidence:Record<string,unknown>;
+  as_of:string;first_seen_at:string|null;changed_at:string|null;resolved_at:string|null;delivery_issue:string|null
 }
-
-export interface Recommendation {
-  status_by_name?:string|null
-  id: number
-  provider: string
-  trigger: string
-  summary: string
-  content: string
-  request_context: AiPreview | null
-  excluded: boolean
-  created_at: string
-  structured: Advice | null
-  status: string
-  status_by: number | null
-  status_at: string | null
-  comment: string
-  snapshot_at: string | null
-  snapshot_version: string | null
-  last_seen_at: string | null
-}
-
-export interface RelatedObjects { task_ids:number[];track_ids:number[];user_ids:number[];incident_ids:number[] }
-export interface Advice {title:string;situation:string;grounds:string[];consequence:string;action:string;limitations:string[];related:RelatedObjects;significance:string;freshness:string}
-export interface AdvisorJob {id:number;kind:string;trigger:string;state:string;question:string;answer:{answer?:string;grounds?:string[];limitations?:string[];related?:RelatedObjects;result?:string}|null;error_code:string|null;attempts:number;created_at:string;snapshot_at:string|null;snapshot_version:string|null;next_attempt_at:string}
-export interface AdvisorQuota {day_remaining:number;day_limit:number;reset_at:string;reset_seconds:number;minute_used:number;minute_limit:number;minute_tokens:number;token_limit:number;queued:number;key_saved:boolean;vault_available:boolean}
-export interface ProviderSettings {model:string;rpm:number;rpd:number;tpm:number;max_attempts:number;max_input_tokens:number;key_saved:boolean;vault_available:boolean}
-
-export interface AiPreview {
-  mode: 'mock'
-  provider: string
-  prompt: string
-  trigger: string
-  question: string
-  snapshot: Record<string, unknown>
-}
+export interface SituationSettingsData {enabled:boolean;near_minutes:number;reminder_minutes:number;mention_captains:boolean;mention_participants:boolean;checked_at?:string|null;initialized_at?:string|null;policy?:string}
 
 export interface TelegramMessage {
   id: number
@@ -288,6 +250,7 @@ export interface OperationalSummary {
   tracks:{id:number|null;name:string;task_ids:number[];done:number;total:number;percent:number|null;active:number;waiting:number;overdue:number;blocked:number;incident_ids:number[]}[]
   incidents:(IncidentSummary&{source_task_id:number|null;cascade_depth:number;targets:{target_type:string;target_id:number}[];hard_task_ids:number[];potential_task_ids:number[];direct_task_ids:number[];affected_task_ids:number[];track_ids:number[];limitations:string[]})[]
   participants:{id:number;display_name:string;traffic_status:string;task_ids:number[];active_ids:number[];ready_ids:number[];waiting_ids:number[];incident_ids:number[];overlaps:number[][];downstream:Cascade}[]
+  situations:Situation[]
   attention:{code:string;reason:string;task_ids:number[];incident_id:number|null;user_ids:number[]}[]
   unassigned_ids:number[];limitations:string[]
 }
@@ -444,20 +407,9 @@ export const api = {
   commentIncident: (id: number, text: string) =>
     request(`/api/v1/incidents/${id}/events`, { method: 'POST', body: JSON.stringify({ text }) }),
 
-  aiSettings: (): Promise<AiSettings> => request(`/api/v1/projects/${pid()}/ai/settings`),
-  advisorQuota: (): Promise<AdvisorQuota> => request(`/api/v1/projects/${pid()}/ai/quota`),
-  advisorJobs: (): Promise<AdvisorJob[]> => request(`/api/v1/projects/${pid()}/ai/requests`),
-  askAdvisor: (kind:'question'|'analysis', question=''):Promise<AdvisorJob> => request(`/api/v1/projects/${pid()}/ai/requests`,{method:'POST',body:JSON.stringify({kind,question})}),
-  decideAdvice: (id:number,status:string,comment:string) => request(`/api/v1/projects/${pid()}/ai/recommendations/${id}`,{method:'PATCH',body:JSON.stringify({status,comment})}),
-  providerSettings: ():Promise<ProviderSettings> => request('/api/v1/ai/provider'),
-  patchProvider: (payload:Partial<ProviderSettings>) => request('/api/v1/ai/provider',{method:'PATCH',body:JSON.stringify(payload)}),
-  deleteAdvisorKey: () => request('/api/v1/ai/provider/key',{method:'DELETE'}),
-  patchAiSettings: (payload: Record<string, unknown>) =>
-    request(`/api/v1/projects/${pid()}/ai/settings`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  previewAi: (question = '', trigger = 'manual'): Promise<AiPreview> => request(`/api/v1/projects/${pid()}/ai/preview`, { method: 'POST', body: JSON.stringify({trigger, question}) }),
-  runAi: (question = '', trigger = 'manual') => request(`/api/v1/projects/${pid()}/ai/run`, { method: 'POST', body: JSON.stringify({ trigger, question }) }),
-  recommendations: (): Promise<Recommendation[]> => request(`/api/v1/projects/${pid()}/ai/recommendations`),
-  excludeRecommendation: (id: number) => request(`/api/v1/projects/${pid()}/ai/recommendations/${id}/exclude`, {method:'POST'}),
+  situationSettings: ():Promise<SituationSettingsData> => request(`/api/v1/projects/${pid()}/situations/settings`),
+  saveSituationSettings: (payload:SituationSettingsData):Promise<SituationSettingsData> => request(`/api/v1/projects/${pid()}/situations/settings`,{method:'PUT',body:JSON.stringify(payload)}),
+  situationHistory: ():Promise<Situation[]> => request(`/api/v1/projects/${pid()}/situations/history`),
 
   notifications: (): Promise<Notification[]> => request('/api/v1/notifications'),
   openNotification: (id:number): Promise<{target:{type:'task'|'incident';id:number;project_id:number}|null;message:string}> => request(`/api/v1/notifications/${id}/open`, {method:'POST'}),

@@ -50,13 +50,3 @@ def test_network_unreachable_is_not_unknown_delivery(monkeypatch):
     with pytest.raises(TelegramError) as exc:
         TelegramClient().send('-100999', 6, 'text')
     assert exc.value.code == 'NETWORK_UNREACHABLE' and not exc.value.uncertain
-
-
-@pytest.mark.parametrize(('details', 'expected'), [
-    ({'error': {'details': [{'reason': 'API_KEY_INVALID'}]}}, 'PROVIDER_AUTH'),
-    ({'error': {'message': 'User location is not supported for the API use.'}}, 'PROVIDER_REGION'),
-    ({'error': {'message': 'Request contains an invalid argument'}}, 'PROVIDER_CONFIG'),
-])
-def test_gemini_400_distinguishes_key_region_and_request(details, expected):
-    from app.services.advisor import provider_error_code
-    assert provider_error_code(400, details) == expected

@@ -103,7 +103,7 @@ def test_failure_scenario_performs_checks_instead_of_just_logging(client):
     login(client)
     result=client.post('/api/v1/admin/sandbox/run',json={'scenario':'integration_failure'}).json()
     assert result['status']=='ok' and result['checks']
-    assert result['checks'][0]['name']=='ai'
+    assert result['checks'][0]['name']=='situations'
     assert len(client.get('/api/v1/projects').json())==1
 
 

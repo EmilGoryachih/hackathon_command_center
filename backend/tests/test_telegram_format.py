@@ -24,14 +24,14 @@ def test_transport_formats_without_interpreting_user_markup(monkeypatch):
         return io.BytesIO(b'{"ok":true,"result":{"message_id":1}}')
 
     monkeypatch.setattr(urllib.request, 'urlopen', response)
-    text = ('🤖 ИИ: ручной анализ #1\n\nПроект: A < B & C\n'
+    text = ('🔎 Появление: старт задачи #1\n\nПроект: A < B & C\n'
             '1. Проверить <b>сервис</b>\nСитуация: «🙂 *не Markdown*»\n'
             'Ответственный: @captain_user\nОткрыть: https://team.example/?project=1&task=2')
     TelegramClient().send('-100', None, text)
     body = requests[0]
     assert body['text'] == text and 'parse_mode' not in body
     styled = [(e['type'], entity_text(text, e)) for e in body['entities']]
-    assert ('bold', '🤖 ИИ: ручной анализ #1') in styled
+    assert ('bold', '🔎 Появление: старт задачи #1') in styled
     assert ('bold', '1. Проверить <b>сервис</b>') in styled
     assert ('italic', '«🙂 *не Markdown*»') in styled
     assert ('mention', '@captain_user') in styled
@@ -42,7 +42,7 @@ def test_transport_formats_without_interpreting_user_markup(monkeypatch):
 @pytest.mark.parametrize(('kind', 'marker'), [
     ('incident_red_created', '🔴'), ('incident_red_confirmed', '🔴'),
     ('incident_yellow_created', '🟡'), ('incident_resolved', '✅'),
-    ('ai_recommendation', '🤖'), ('task_assigned', '📌'), ('task_overdue', '⏰'),
+    ('situation_appeared', '🔎'), ('task_assigned', '📌'), ('task_overdue', '⏰'),
 ])
 def test_event_marker_and_readable_sections(monkeypatch, kind, marker):
     db = Mock()
@@ -59,7 +59,7 @@ def test_event_marker_and_readable_sections(monkeypatch, kind, marker):
 
 def test_split_formatted_report_preserves_text_and_offsets(monkeypatch):
     monkeypatch.setattr(vault, 'load', lambda: 'synthetic')
-    text = '🤖 ИИ: анализ\n\n' + ('Ситуация: 🙂 <&> «цитата»\n' * 600)
+    text = '🔎 Изменение: влияние инцидента\n\n' + ('Ситуация: 🙂 <&> «цитата»\n' * 600)
     parts = svc.split_text(text)
     assert ''.join(parts) == text
 

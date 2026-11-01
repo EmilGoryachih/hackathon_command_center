@@ -26,6 +26,7 @@ def test_backup_and_restore(client):
     r = client.post(f"/api/v1/admin/backups/{bid}/restore", json={"confirm": True})
     assert r.status_code == 200
 
+    login(client)  # Restore revokes sessions from the recovered snapshot.
     titles = [t["title"] for t in client.get("/api/v1/projects/1/tasks").json()]
     assert titles == ["A"]
 

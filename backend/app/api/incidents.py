@@ -10,7 +10,6 @@ from app.deps import project_roles, project_member_ids, ensure_project_active, g
 from app.schemas import CommentIncident, ConfirmRed, IncidentCreate, IncidentOut, ResolveIncident
 from app.services import incidents as incidents_svc
 from app.services import notifications as notify_svc
-from app.services.ai import maybe_recommend
 
 router = APIRouter(tags=["incidents"])
 
@@ -108,8 +107,6 @@ def create_incident(
             db, project_id=project_id, user_ids=list(recipients), ntype="incident_yellow_created",
             payload=payload, telegram_text=f"🟡 Блокер: {incident.title}",
         )
-    if body.level == 'yellow':
-        maybe_recommend(db, project_id, 'blocker_created')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)
@@ -138,7 +135,6 @@ def confirm_red(
             payload={"incident_id": incident.id, "title": incident.title},
             telegram_text=f"🔴 Глобальная проблема: {incident.title}",
         )
-        maybe_recommend(db, incident.project_id, 'red_confirmed')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)
@@ -167,7 +163,6 @@ def resolve_incident(
         payload={"incident_id": incident.id, "title": incident.title, "resolution": body.resolution},
         telegram_text=f"✅ Инцидент закрыт: {incident.title}",
     )
-    maybe_recommend(db, incident.project_id, 'blocker_closed')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)

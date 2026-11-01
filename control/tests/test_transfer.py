@@ -14,6 +14,8 @@ def test_transfer_suspends_queues_disables_ai_and_pauses_timers_at_snapshot(tmp_
         INSERT INTO telegram_deliveries VALUES('pending',NULL,'lease',NULL);
         CREATE TABLE ai_settings(enabled INTEGER,auto_enabled INTEGER);
         INSERT INTO ai_settings VALUES(1,1);
+        CREATE TABLE situation_settings(enabled INTEGER, initialized_at TEXT, checked_at TEXT);
+        INSERT INTO situation_settings VALUES(1,'2030-01-01','2030-01-01');
         CREATE TABLE task_timers(id INTEGER,state TEXT,accumulated_seconds INTEGER,last_started_at TEXT);
         INSERT INTO task_timers VALUES(1,'running',20,'2026-10-29 08:00:00');
         CREATE TABLE timer_segments(ended_at TEXT);
@@ -24,6 +26,7 @@ def test_transfer_suspends_queues_disables_ai_and_pauses_timers_at_snapshot(tmp_
         assert db.execute("SELECT state FROM advisor_jobs").fetchone() == ('failed',)
         assert db.execute("SELECT state FROM telegram_deliveries").fetchone() == ('uncertain',)
         assert db.execute("SELECT enabled,auto_enabled FROM ai_settings").fetchone() == (0,0)
+        assert db.execute("SELECT enabled,initialized_at,checked_at FROM situation_settings").fetchone() == (0,None,None)
         assert db.execute("SELECT state,accumulated_seconds,last_started_at FROM task_timers").fetchone() == ('paused',80,None)
     assert (tmp_path / ".transfer-pending").exists()
-    assert (tmp_path / ".ai-not-before").is_file()
+    assert not (tmp_path / ".ai-not-before").exists()

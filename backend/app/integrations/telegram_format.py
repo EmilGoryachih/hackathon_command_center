@@ -31,7 +31,7 @@ def message_entities(text: str) -> list[Entity]:
         line = raw.rstrip('\r\n')
         # Leave room for Telegram's entity limit; links/mentions take priority.
         if len(entities) <= 98:
-            if line.startswith(('🔴 ', '🟡 ', '✅ ', '🤖 ', '📌 ', '⏰ ', '🧪 ')) or re.match(r'^\d+\. ', line):
+            if line.startswith(('🔴 ', '🟡 ', '✅ ', '🔎 ', '📌 ', '⏰ ', '🧪 ')) or re.match(r'^\d+\. ', line):
                 add('bold', offset, offset + len(line))
             elif line.startswith(labels) and ': ' in line:
                 label, value = line.split(': ', 1)

@@ -261,6 +261,11 @@ function TypeLabel({ type }: { type: string }) {
     incident_resolved: '✅ Инцидент закрыт',
     task_assigned: '📌 Назначена задача',
     task_overdue: '⏰ Просрочена задача',
+    situation_appeared: '🔎 Новая ситуация',
+    situation_changed: '🔎 Изменение ситуации',
+    situation_resolved: '✅ Ситуация разрешена',
+    situation_reappeared: '🔎 Ситуация появилась снова',
+    situation_reminder: '🔎 Напоминание о ситуации',
   }
   return <b>{map[type] ?? 'Уведомление'}</b>
 }

@@ -1,7 +1,7 @@
 """Separate DPAPI secret using the existing Windows vault and instance isolation."""
 from pathlib import Path
 from app.config import settings
-from app.services import advisor_vault as windows
+from app.services import windows_vault as windows
 
 VaultUnavailable = windows.VaultUnavailable
 available = windows.available

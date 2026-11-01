@@ -35,6 +35,7 @@ def main() -> None:
         if len(request('GET','/projects/1/tasks')) != 2:
             raise RuntimeError('Не удалось подготовить изменения после резервной копии')
         request('POST',f"/admin/backups/{backup['id']}/restore",{'confirm':True})
+        request('POST','/auth/login',{'login':'sandbox-admin','password':'sandbox-pass'})
         tasks = request('GET','/projects/1/tasks')
         if [task['title'] for task in tasks] != ['Before backup']:
             raise RuntimeError('API restore не восстановил исходные задачи')

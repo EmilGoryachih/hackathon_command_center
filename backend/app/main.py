@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     admin,
-    ai,
+    situations,
     analytics,
     audit,
     auth,
@@ -98,17 +98,17 @@ async def _running_services(app: FastAPI):
     stop = threading.Event()
     thread = threading.Thread(target=_scheduler_loop, args=(stop,), daemon=True)
     thread.start()
-    advisor_thread = threading.Thread(target=_advisor_loop, args=(stop,), daemon=True)
-    advisor_thread.start()
+    situation_thread = threading.Thread(target=_situation_loop, args=(stop,), daemon=True)
+    situation_thread.start()
     telegram_thread = threading.Thread(target=_telegram_loop, args=(stop,), daemon=True)
     telegram_thread.start()
-    app.state.workers = [thread, advisor_thread, telegram_thread]
+    app.state.workers = [thread, situation_thread, telegram_thread]
     try:
         yield
     finally:
         stop.set()
         thread.join(timeout=5)
-        advisor_thread.join(timeout=100)
+        situation_thread.join(timeout=10)
         telegram_thread.join(timeout=25)
 
 
@@ -124,22 +124,18 @@ def _telegram_loop(stop: Event) -> None:
         stop.wait(0.1 if worked else 3)
 
 
-def _advisor_loop(stop) -> None:
-    from app.services import advisor
-    from app.services.portable import ai_allowed, operation_lock
+def _situation_loop(stop: Event) -> None:
+    from app.services.situations import run_all
+    from app.services.portable import operation_lock, external_allowed
     while not stop.is_set():
         try:
             with operation_lock():
-                if ai_allowed():
-                    with SessionLocal() as db:
-                        advisor.schedule(db)
-                    worked = advisor.work_once(SessionLocal)
-                else:
-                    worked = False
+                if external_allowed():
+                    run_all(SessionLocal)
         except Exception:
-            # No raw provider/credential exceptions in logs. Leases recover interrupted jobs.
-            worked = False
-        stop.wait(1 if worked else 5)
+            import logging
+            logging.getLogger(__name__).warning('Situation check failed; transaction rolled back')
+        stop.wait(30)
 
 
 def _scheduler_loop(stop) -> None:
@@ -209,7 +205,7 @@ def create_app() -> FastAPI:
     app.include_router(incidents.router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
-    app.include_router(ai.router, prefix="/api/v1")
+    app.include_router(situations.router, prefix="/api/v1")
     app.include_router(telegram.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
     app.include_router(sandbox.router, prefix="/api/v1")

@@ -89,6 +89,12 @@ def create_backup(db: Session, kind: str = "automatic") -> BackupRecord:
 
 
 def restore_backup(db: Session, backup_id: int) -> BackupRecord:
+    from app.services.portable import operation_lock
+    with operation_lock():
+        return _restore_backup(db, backup_id)
+
+
+def _restore_backup(db: Session, backup_id: int) -> BackupRecord:
     record = db.get(BackupRecord, backup_id)
     if record is None:
         raise api_error(404, "NOT_FOUND", "Резервная копия не найдена")
@@ -97,6 +103,7 @@ def restore_backup(db: Session, backup_id: int) -> BackupRecord:
         raise api_error(404, "NOT_FOUND", "Файл резервной копии не найден")
     if _sha256(latest) != record.checksum:
         raise api_error(409, "BACKUP_CORRUPT", "Резервная копия повреждена")
+    snapshot_at = record.created_at.isoformat() + 'Z'
 
     # Защитная копия текущего состояния.
     create_backup(db, kind="safety")
@@ -126,9 +133,10 @@ def restore_backup(db: Session, backup_id: int) -> BackupRecord:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    from app.main import stamp_head
-
-    stamp_head()
+    from app.main import run_migrations
+    run_migrations()
+    from app.services.restore_fence import suspend_external_actions
+    suspend_external_actions(settings.data_dir, snapshot_at, database=db_file_path())
     return record
 
 

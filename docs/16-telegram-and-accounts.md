@@ -1,5 +1,7 @@
 # Hermes · Telegram и удаление аккаунтов
 
+С 01.11.2026 маршруты и отчёты ИИ отключены. Их описание ниже архивное. Вместо них используются пять событий [анализатора ситуаций](18-situation-analyzer.md). Обычные уведомления и аккаунты сохраняют прежнее поведение.
+
 ## Подключение
 
 Hermes доставляет события Aion через Telegram. Токен задаётся, заменяется и удаляется
@@ -146,7 +148,7 @@ IP для этих записей очищается. Незавершённые
 Миграция `20261029_telegram_accounts` добавляет TelegramSettings, поля outbox и техническую
 метку User.deleted_identity, сохраняя существующие mock-записи как preview.
 
-Тесты: test_telegram_delivery.py, test_telegram_ai_reports.py, test_account_deletion.py.
+Тесты: test_telegram_delivery.py, test_situations.py, test_account_deletion.py.
 Для UI: `cd backend` → `..\.venv\Scripts\python.exe -m tests.telegram_preview`, затем Vite.
 Создаётся отдельная временная БД, провайдеры подставные, доступ к реальному токену отсутствует.
 Вход preview-admin / preview-only. Тема 999 имитирует недоступную тему.

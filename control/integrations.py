@@ -19,6 +19,8 @@ def tunnel_binary() -> str | None:
 
 
 def validate(name: str, key: str) -> tuple[str, str]:
+    if name not in {'telegram', 'fxtunnel'}:
+        return 'retired', 'Интеграция отключена'
     key = key.strip()
     if not key:
         return 'missing', 'Ключ не задан'
@@ -40,16 +42,13 @@ def validate(name: str, key: str) -> tuple[str, str]:
         except (OSError, subprocess.TimeoutExpired):
             pass
         return 'unknown', 'Ключ сохранён; fxTunnel недоступен или не подтвердил доступ'
-    request = (urllib.request.Request(f'https://api.telegram.org/bot{key}/getMe') if name == 'telegram'
-               else urllib.request.Request('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1',
-                    headers={'x-goog-api-key': key}))
+    request = urllib.request.Request(f'https://api.telegram.org/bot{key}/getMe')
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             body = json.loads(response.read(65536))
         if name == 'telegram' and not body.get('ok'):
             return 'invalid', 'Telegram отклонил токен'
-        return 'valid', ('Telegram подтвердил токен бота' if name == 'telegram'
-                         else 'Google подтвердил ключ; доступ к модели и квота проверяются при запросе')
+        return 'valid', 'Telegram подтвердил токен бота'
     except urllib.error.HTTPError as exc:
         try:
             data = json.loads(exc.read(65536))

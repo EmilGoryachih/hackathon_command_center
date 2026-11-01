@@ -130,7 +130,7 @@ def test_partial_delivery_pauses_after_identity_redaction(client):
     login(client)
     uid=create(client,'redact_person')
     with TestingSessionLocal() as db:
-        db.add(TelegramDelivery(project_id=1,event_type='ai_report',text='Action for redact_person',
+        db.add(TelegramDelivery(project_id=1,event_type='situation_appeared',text='Action for redact_person',
             mentions=[],mode='live',state='pending',chat_id='-100123',message_ids=[70]))
         db.commit()
     client.post(f'/api/v1/admin/users/{uid}/deactivate')
@@ -162,4 +162,5 @@ def test_closed_incident_history_displays_deleted_identity(client):
     result=client.get(f'/api/v1/incidents/{iid}').json()
     assert result['deleted_user_ids']==[result['author_id']]
     assert result['owner_id']==result['author_id']==result['events'][0]['actor_id']
-    assert client.get('/api/v1/projects/1/ai/recommendations').json()[0]['status_by_name']=='Удалённый пользователь'
+    with TestingSessionLocal() as db:
+        assert db.query(AiRecommendation).one().status_by == result['author_id']

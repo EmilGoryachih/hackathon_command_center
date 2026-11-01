@@ -23,6 +23,10 @@ def measure(numerator: int, denominator: int, missing: int = 0) -> dict[str, Any
 
 
 def build_summary(db: Session, project_id: int) -> OperationalSummary:
+    connection = db.connection()
+    if connection.dialect.name == 'sqlite' and not connection.connection.driver_connection.in_transaction:
+        # sqlite3 legacy mode does not BEGIN on SELECT. Pin all rule facts to one snapshot.
+        connection.exec_driver_sql('BEGIN')
     now = utcnow()
     project = db.get(Project, project_id)
     plan = planning.read(db, project_id)
@@ -58,7 +62,7 @@ def build_summary(db: Session, project_id: int) -> OperationalSummary:
         track_ids = {by_id[tid]['module_id'] for tid in affected if tid in by_id and by_id[tid]['module_id'] is not None}
         track_ids.update(t.target_id for t in info.targets if t.target_type == 'module' and t.target_id in {l['id'] for l in plan['lanes']})
         incidents.append({'id':info.id, 'number':info.number, 'title':info.title, 'level':info.level,
-                          'status':info.status, 'source_task_id':info.source_task_id, 'cascade_depth':info.cascade_depth,
+                          'status':info.status, 'owner_id':incident.owner_id, 'source_task_id':info.source_task_id, 'cascade_depth':info.cascade_depth,
                           'targets':[t.model_dump() for t in info.targets], 'direct_task_ids':sorted(direct),
                           'affected_task_ids':sorted(affected),
                           'hard_task_ids':sorted(hard), 'potential_task_ids':sorted(potential),
@@ -77,6 +81,8 @@ def build_summary(db: Session, project_id: int) -> OperationalSummary:
         availability = ('done' if task['column_semantic'] == 'done' else 'active' if task['column_semantic'] == 'active'
                         else 'waiting' if reasons else 'ready')
         result_tasks.append({**task, 'track_name':next((l['name'] for l in plan['lanes'] if l['id'] == task['module_id']), None),
+                             'planned_start':placements.get(tid, {}).get('start'),
+                             'planned_end':placements.get(tid, {}).get('planned_end'),
                              'availability':availability, 'waiting_reasons':reasons, 'missing':missing})
         checks = [('missing_plan', '; '.join(missing), bool(missing))]
         if tid in unfinished:
@@ -133,7 +139,7 @@ def build_summary(db: Session, project_id: int) -> OperationalSummary:
         'Инциденты показаны по сохранённым целям и действующему алгоритму эскалации; возможное влияние не означает блокировку старта.',
         'Влияние по зависимостям рассчитано существующим алгоритмом до четырёх уровней.']))
     known = [t for t in tasks if t['estimate_seconds'] is not None]
-    return OperationalSummary.model_validate({
+    summary = OperationalSummary.model_validate({
         'project_id':project_id, 'generated_at':now, 'project_state':project.state, 'period':period,
         'progress':{'tasks':measure(len(tasks)-len(unfinished), len(tasks)),
                     'duration':measure(sum(t['estimate_seconds'] for t in known if t['id'] not in unfinished),
@@ -142,3 +148,6 @@ def build_summary(db: Session, project_id: int) -> OperationalSummary:
                 'covered_tasks':len(placements), 'total_tasks':len(tasks), 'limitations':limitations},
         'tasks':result_tasks, 'tracks':tracks, 'incidents':incidents, 'participants':people, 'attention':attention,
         'unassigned_ids':[t['id'] for t in tasks if not t['assignees']], 'limitations':limitations})
+    from app.services.situations import evaluate, config, decorate
+    summary.situations = decorate(db, summary, evaluate(summary, config(db, project_id)))
+    return summary

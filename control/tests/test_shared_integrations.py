@@ -71,13 +71,13 @@ def test_backups_move_to_project_folder_and_keep_legacy_copy(tmp_path):
 
 def test_key_validation_is_safe_and_invalidated_after_replace(tmp_path, monkeypatch):
     c = Controller(tmp_path)
-    c.vault.put('gemini', 'synthetic')
+    c.vault.put('telegram', 'synthetic')
     monkeypatch.setattr('control.integrations.validate', lambda name, key: ('valid', 'API подтвердил ключ'))
     c.validate_keys()
-    assert c.key_states()['gemini']['status'] == 'valid'
+    assert c.key_states()['telegram']['status'] == 'valid'
     assert 'synthetic' not in str(c.view())
-    c.vault.put('gemini', 'replacement')
-    assert c.key_states()['gemini']['status'] == 'unknown'
+    c.vault.put('telegram', 'replacement')
+    assert c.key_states()['telegram']['status'] == 'unknown'
 
 
 def test_key_validation_strips_whitespace_and_handles_region_without_leaks(monkeypatch):
@@ -93,7 +93,7 @@ def test_key_validation_strips_whitespace_and_handles_region_without_leaks(monke
             'error': {'message': 'User location is not supported for the API use.'}}).encode()))
     monkeypatch.setattr('urllib.request.urlopen', region)
     state, detail = validate('gemini', key)
-    assert state == 'blocked' and key not in detail
+    assert state == 'retired' and key not in detail
 
 
 def test_manager_reuses_keys_from_inactive_project(tmp_path):

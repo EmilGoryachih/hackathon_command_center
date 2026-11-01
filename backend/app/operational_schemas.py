@@ -1,10 +1,11 @@
-"""Stable facts and computed measures shared by analytics and AI context."""
+"""Stable facts and computed measures shared by analytics and situation rules."""
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.cascade_schemas import CascadeOut
+from app.situation_schemas import Situation
 from app.schemas import AnalyticsOut, TaskOut, PredecessorOut, ParticipantOut
 
 
@@ -55,6 +56,8 @@ class Attention(BaseModel):
 
 
 class SummaryTask(TaskOut):
+    planned_start: datetime | None = None
+    planned_end: datetime | None = None
     track_name: str | None
     availability: Literal['done', 'active', 'waiting', 'ready']
     waiting_reasons: list[str]
@@ -82,6 +85,7 @@ class IncidentImpact(BaseModel):
     id: int
     number: int
     title: str
+    owner_id: int | None = None
     status: str
     level: str
     source_task_id: int | None
@@ -109,6 +113,7 @@ class Workload(BaseModel):
 
 
 class OperationalSummary(BaseModel):
+    situations: list[Situation] = Field(default_factory=list)
     project_id: int
     generated_at: datetime
     project_state: str

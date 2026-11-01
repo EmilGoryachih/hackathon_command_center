@@ -7,12 +7,13 @@ import time
 import os
 import uuid
 import re
-from contextlib import nullcontext
 from pathlib import Path
+from threading import RLock
 
 from app.config import settings
 
 _storage_check: tuple[str, float, bool] = ("", 0, False)
+_local_operation_lock = RLock()
 
 
 def current_public_url() -> str:
@@ -46,7 +47,7 @@ def storage_ready() -> bool:
 
 def operation_lock():
     if not settings.app_managed:
-        return nullcontext()
+        return _local_operation_lock
     from control.locking import FileLock
     return FileLock(settings.data_dir / ".hcc-operation.lock")
 
@@ -55,18 +56,6 @@ def external_allowed() -> bool:
     if not settings.app_managed:
         return True
     return not (settings.data_dir / ".transfer-pending").exists()
-
-
-def ai_allowed() -> bool:
-    if not external_allowed():
-        return False
-    marker = settings.data_dir / ".ai-not-before"
-    if settings.app_managed and marker.exists():
-        try:
-            return time.time() >= float(marker.read_text())
-        except (OSError, ValueError):
-            return False
-    return True
 
 
 def preflight_migrations() -> None:

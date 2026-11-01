@@ -34,6 +34,9 @@ TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commi
 def client():
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    # create_all builds the current schema; an Alembic stamp from a previous test is stale.
+    from app.main import stamp_head
+    stamp_head()
     db = TestingSessionLocal()
     bootstrap(db)
     db.close()

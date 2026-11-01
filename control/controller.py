@@ -158,7 +158,7 @@ class Controller:
         except (OSError, ValueError):
             saved = {}
         states = {}
-        for name in ('telegram', 'gemini', 'fxtunnel'):
+        for name in ('telegram', 'fxtunnel'):
             key = self.vault.get(name) if self.vault.unlocked else ''
             item = saved.get(name, {})
             valid = key and item.get('fingerprint') == hashlib.sha256(key.encode()).hexdigest()
@@ -175,7 +175,7 @@ class Controller:
         from control.integrations import validate
         target = self.vault.shared or self.vault
         states = {}
-        for name in ('telegram', 'gemini', 'fxtunnel'):
+        for name in ('telegram', 'fxtunnel'):
             key = self.vault.get(name)
             status, detail = validate(name, key)
             states[name] = {'status': status, 'detail': detail, 'checked_at': time.time(),
@@ -184,17 +184,17 @@ class Controller:
             # Check the actual container's network and mounted keys, not only Windows.
             script = ("import json; from app.config import settings; "
                       "from control.integrations import validate; "
-                      "print(json.dumps({n:validate(n, settings.secret_value(n)) for n in ('telegram','gemini')}))")
+                      "print(json.dumps({n:validate(n, settings.secret_value(n)) for n in ('telegram',)}))")
             try:
                 runtime = json.loads(self.docker.compose(['exec', '-T', 'app', 'python', '-c', script], timeout=60))
-                for name in ('telegram', 'gemini'):
+                for name in ('telegram',):
                     status, detail = runtime[name]
                     states[name]['runtime_status'] = status
                     states[name]['detail'] += ' · Aion: ' + detail
                     if status != 'valid':
                         states[name]['status'] = status
             except (DockerError, ValueError, KeyError, TypeError):
-                for name in ('telegram', 'gemini'):
+                for name in ('telegram',):
                     states[name]['detail'] += ' · Проверка контейнера не завершена'
         atomic_write(target.folder / 'key-status.json', json.dumps(states).encode())
 
@@ -308,7 +308,7 @@ class Controller:
     def stage_secrets(self) -> None:
         self.sync_project_settings()
         self.write_compose()
-        values = {name: self.vault.get(name) for name in ("operator", "bootstrap_password", "gemini", "telegram")}
+        values = {name: self.vault.get(name) for name in ("operator", "bootstrap_password", "telegram")}
         # Values travel over stdin, never in command arguments, logs, Compose or environment.
         if os.name == "nt":
             script = ("import os,json,pathlib; os.umask(0o077); "
@@ -319,7 +319,7 @@ class Controller:
             for name, value in values.items():
                 atomic_write(Path(self.runtime) / name, value.encode())
         self.history['staged_keys'] = {name: hashlib.sha256(values[name].encode()).hexdigest()
-                                      for name in ('telegram', 'gemini')}
+                                      for name in ('telegram',)}
         self.persist()
 
     def execute(self, action: str) -> None:
@@ -426,17 +426,14 @@ class Controller:
         telegram = state('error', self.history['telegram_error']) if self.history.get('telegram_error') else state(
             'ok' if self.history.get('telegram_at') or self.history.get('alert_at') else 'unknown' if self.config.get('telegram_chat') or self.config.get('telegram_alert_chat') else 'waiting',
             'Последняя отправка подтверждена' if self.history.get('telegram_at') or self.history.get('alert_at') else 'Сохраните направления и отправьте тест')
-        gemini = state('waiting', 'Ключ не задан')
-        if self.vault.unlocked and self.vault.get('gemini'):
-            gemini = state('unknown', 'Ключ сохранён. Проверка запросом не выполнялась; ИИ включается в платформе')
-        return {'docker': engine, 'platform': api, 'fxtunnel': tunnel, 'telegram': telegram, 'gemini': gemini}
+        return {'docker': engine, 'platform': api, 'fxtunnel': tunnel, 'telegram': telegram}
 
     def update_services(self) -> None:
         states = self.service_states()
         previous = self.history.setdefault('service_states', {})
         queue = self.history.setdefault('alert_outbox', [])
         labels = {'ok':'работает','error':'сбой','loading':'подготовка','unknown':'не проверено','waiting':'ожидает запуска'}
-        names = {'docker':'Docker','platform':'Платформа','fxtunnel':'fxTunnel','telegram':'Telegram','gemini':'Gemini'}
+        names = {'docker':'Docker','platform':'Платформа','fxtunnel':'fxTunnel','telegram':'Telegram'}
         for name, value in states.items():
             old = previous.get(name)
             if old != value['status']:

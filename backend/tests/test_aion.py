@@ -11,8 +11,8 @@ def test_managed_project_creation_requires_daemon(client, monkeypatch):
 
 def test_delivery_identity():
     from app.services.telegram import sender_identity
-    assert sender_identity('ai_report') == '👁 Argus'
-    assert sender_identity('ai_recommendation') == '👁 Argus'
+    assert sender_identity('situation_appeared') == '👁 Argus · анализатор'
+    assert sender_identity('situation_resolved') == '👁 Argus · анализатор'
     assert sender_identity('task_assigned') == '✉️ Hermes'
 
 

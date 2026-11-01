@@ -28,14 +28,14 @@ SANDBOX_NAME = "Sandbox"
 
 # Сценарии: имя → описание для интерфейса.
 SCENARIOS: dict[str, str] = {
-    'prepare_demo': 'Подготовить полный демо-набор без дубликатов: доска, связи, таймеры, светофор и ИИ',
+    'prepare_demo': 'Подготовить полный демо-набор без дубликатов: доска, связи, таймеры, светофор и ситуации',
     "create_team": "Создать тестовую команду (alice, bob — участники; cap — капитан)",
     "simulate_sprint": "Симулировать работу: задачи, таймеры, перемещения и инцидент от имени команды",
     "overdue_as_dev": "От имени alice просрочить задачу (дедлайн в прошлом)",
     "incident_as_dev": "От имени bob создать жёлтый инцидент",
     "timer_cycle": "Полный цикл таймера: start → pause → stop",
     "mock_notifications": "Мок Telegram: назначение задачи, блокер и просрочка (только Sandbox)",
-    "integration_failure": "Проверить выключенный ИИ, неверные настройки и отключённые триггеры в изолированной БД",
+    "integration_failure": "Проверить анализатор, доступ и уведомления в изолированной БД",
 }
 
 TEAM = [("alice", "Alice", "participant"), ("bob", "Bob", "participant"), ("cap", "Captain", "captain")]
@@ -222,7 +222,7 @@ def record_run(db: Session, scenario: str, status: str, logs: list[str], actor_i
 def prepare_demo(db: Session, project: Project) -> tuple[bool, list[str]]:
     from app.db.models import Module, TaskDependency, ChecklistItem
     from app.schemas import IncidentTargetIn
-    from app.services import timers, ai
+    from app.services import timers
     from app.services.incidents import confirm_red
     from app.services.notifications import notify_users, team as project_team
 
@@ -278,10 +278,7 @@ def prepare_demo(db: Session, project: Project) -> tuple[bool, list[str]]:
     notify_users(db, project_id=project.id, user_ids=project_team(db, project.id),
         ntype='incident_red_confirmed', payload={'incident_id':red.id,'title':red.title},
         telegram_text=f'🔴 Глобальная проблема: {red.title}')
-    config = ai.get_settings(db, project.id)
-    config.enabled = True
-    ai.run_recommendation(db, project.id, 'manual', 'Проверь демонстрационный проект')
     project.settings = {**project.settings, 'demo_version':1}
     db.commit()
     return True, [f'Подготовлен проект #{project.id}: 10 задач, 2 модуля, чек-лист, зависимость и подзадача.',
-                  'Есть активный и приостановленный таймеры, жёлтый блокер, красная эскалация и мок-рекомендация ИИ.']
+                  'Есть активный и приостановленный таймеры, жёлтый блокер, красная эскалация и основания для анализатора ситуаций.']

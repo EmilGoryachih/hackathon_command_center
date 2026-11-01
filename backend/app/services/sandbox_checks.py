@@ -40,7 +40,7 @@ CHECKS: dict[str, str] = {
     'board': 'Колонки, задачи, связи и чек-листы',
     'timers': 'Таймеры и корректировка времени',
     'incidents': 'Блокеры, эскалация и светофор',
-    'ai': 'Контекст ИИ и уведомления Telegram',
+    'situations': 'Анализатор ситуаций и уведомления',
     'completion': 'Завершение и повторное открытие',
     'recovery': 'Резервная копия и восстановление',
 }
@@ -120,7 +120,7 @@ def check_auth(c: CheckContext) -> str:
     c.request('GET', '/projects/2/tasks', status=403)
     c.request('GET', '/admin/users', status=403)
     c.request('POST', '/admin/backups', status=403)
-    c.request('PATCH', '/projects/1/ai/settings', {'enabled': True}, status=403)
+    c.request('PUT', '/projects/1/situations/settings', {'enabled': True}, status=403)
     c.request('POST', '/auth/logout')
     c.request('GET', '/auth/me', status=401)
     c.login('captain')
@@ -189,36 +189,16 @@ def check_incidents(c: CheckContext) -> str:
     return 'Жёлтый блокер, комментарий, красная эскалация, полномочия капитана и возврат светофора к зелёному.'
 
 
-def check_ai(c: CheckContext) -> str:
+def check_situations(c: CheckContext) -> str:
     c.login()
-    c.task('AI context check')
-    c.request('POST','/projects/1/ai/run',{'trigger':'manual'},status=409)
-    c.request('PATCH','/projects/1/ai/settings',{'priority_provider':'unknown'},status=422)
-    c.request('PATCH','/projects/1/ai/settings',{'enabled':True,'prompt':'Sandbox prompt','triggers':{'overdue':False}})
-    preview = c.request('POST','/projects/1/ai/preview',{'question':'What is blocked?'})
-    assert preview['mode']=='mock' and preview['prompt']=='Sandbox prompt'
-    # Exercise legacy history only inside this disposable DB; no credential or provider use.
-    from app.services.ai import run_recommendation
-    engine = create_engine(f'sqlite:///{c.database.as_posix()}')
-    with Session(engine) as db:
-        row = run_recommendation(db, 1, 'manual', 'What is blocked?')
-        db.commit()
-        rec = {'id': row.id, 'request_context': row.request_context}
-    engine.dispose()
-    rec['request_context']['snapshot']['analytics_summary'].pop('generated_at', None)
-    preview['snapshot']['analytics_summary'].pop('generated_at', None)
-    assert rec['request_context']==preview, 'Сохранённый контекст отличается от запроса'
-    c.request('POST',f"/projects/1/ai/recommendations/{rec['id']}/exclude")
-    preview = c.request('GET','/projects/1/ai/preview')
-    assert preview['snapshot']['previous_recommendations']==[], 'Исключённая рекомендация осталась в контексте'
-    c.request('POST','/projects/1/ai/run',{'trigger':'overdue'},status=422)
-    messages = c.request('GET','/admin/sandbox/telegram?project_id=1')
-    assert any(m['event_type']=='ai_recommendation' and m['mode']=='mock' for m in messages)
+    c.request('POST','/projects/1/tasks',{'title':'Situation check','deadline':'2020-01-01T00:00:00Z'})
+    c.request('GET','/projects/1/ai/settings',status=404)
+    c.request('PUT','/projects/1/situations/settings',{'enabled':True})
+    result = c.request('GET','/projects/1/analytics')
+    assert result['summary']['situations']
     c.login('member')
-    notifications=c.request('GET','/notifications')
-    assert notifications, 'Нет внутреннего уведомления участнику'
-    c.request('POST',f"/notifications/{notifications[0]['id']}/read")
-    return 'Выключенный ИИ, неверные настройки, промпт/вопрос, сохранённый контекст, исключение рекомендации, отключённый триггер и журналы моков.'
+    c.request('PUT','/projects/1/situations/settings',{'enabled':True},status=403)
+    return 'Ситуации видны участникам, настройки доступны капитану; ИИ отключён, внешняя отправка не выполняется.'
 
 
 def check_completion(c: CheckContext) -> str:
@@ -258,7 +238,7 @@ def check_recovery(c: CheckContext) -> str:
 
 RUNNERS: dict[str, Callable[[CheckContext], str]] = {
     'auth':check_auth, 'board':check_board, 'timers':check_timers, 'incidents':check_incidents,
-    'ai':check_ai, 'completion':check_completion, 'recovery':check_recovery,
+    'situations':check_situations, 'completion':check_completion, 'recovery':check_recovery,
 }
 
 

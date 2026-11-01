@@ -73,8 +73,6 @@ def check_overdue(db: Session, project_id: int | None = None) -> int:
                 telegram_text=f"⏰ Просрочена задача: {task.title}",
             )
             created += 1
-            from app.services.ai import maybe_recommend
-            maybe_recommend(db, project.id, 'overdue')
         db.commit()
     return created
 
@@ -83,16 +81,4 @@ def run_all_jobs(db: Session) -> dict:
     return {
         "locks_cleaned": cleanup_locks(db),
         "overdue_notified": check_overdue(db),
-        'deadline_ai': check_deadline_ai(db),
     }
-
-
-def check_deadline_ai(db: Session) -> int:
-    from datetime import timedelta
-    from app.services.ai import maybe_recommend
-    now = utcnow()
-    projects = db.query(Project).filter(Project.state != 'completed', Project.deadline_msk > now,
-        Project.deadline_msk <= now + timedelta(hours=6)).all()
-    count = sum(int(maybe_recommend(db, p.id, 'deadline_6h')) for p in projects)
-    db.commit()
-    return count

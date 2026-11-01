@@ -54,12 +54,14 @@ def test_keys_can_be_replaced_preserved_and_removed_only_locally(panel):
     login(panel)
     headers = {'Origin': 'http://127.0.0.1:8787'}
     vault = panel.app.state.controller.vault
-    assert panel.post('/api/settings', json={'telegram': 'test-token', 'gemini': 'test-key'}, headers=headers).status_code == 200
-    assert vault.get('gemini') == 'test-key'
+    vault.put('gemini', 'saved-history-secret')
+    assert panel.post('/api/settings', json={'telegram': 'test-token'}, headers=headers).status_code == 200
+    assert vault.get('gemini') == 'saved-history-secret'
     panel.post('/api/settings', json={}, headers=headers)
     assert vault.get('telegram') == 'test-token'
-    panel.post('/api/settings', json={'clear_keys': ['telegram', 'gemini']}, headers=headers)
-    assert vault.get('telegram') == vault.get('gemini') == ''
+    panel.post('/api/settings', json={'clear_keys': ['telegram']}, headers=headers)
+    assert vault.get('telegram') == ''
+    assert vault.get('gemini') == 'saved-history-secret'
     panel.post('/api/tunnel/settings', json={'fxtunnel': 'test-tunnel'}, headers=headers)
     assert vault.get('fxtunnel') == 'test-tunnel'
     panel.post('/api/tunnel/settings', json={'clear_key': True}, headers=headers)

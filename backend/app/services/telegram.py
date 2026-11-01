@@ -9,7 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import (TelegramSettings, TelegramDelivery, Project, User, Task, TaskAssignee,
-                           Incident, Role, RoleAssignment, AdvisorJob)
+                           Incident)
 from app.integrations.telegram import TelegramError, telegram_client
 from app.telegram_schemas import normalize_username
 from app.timeutil import utcnow
@@ -22,16 +22,19 @@ EVENTS = {
     'incident_red_created': 'Запрос серьёзного инцидента',
     'incident_red_confirmed': 'Подтверждение серьёзного инцидента',
     'incident_resolved': 'Закрытие инцидента',
-    'ai_recommendation': 'Новая рекомендация ИИ (отдельная)',
-    'ai_report': 'Полный отчёт запуска ИИ',
+    **{f'situation_{k}': f'Анализатор: {v}' for k,v in {
+        'appeared':'появление', 'changed':'изменение', 'resolved':'разрешение',
+        'reappeared':'повторное появление', 'reminder':'напоминание'}.items()},
 }
 EVENT_MARKERS = {
     'task_assigned': '📌', 'task_overdue': '⏰',
     'incident_yellow_created': '🟡', 'incident_red_created': '🔴',
     'incident_red_confirmed': '🔴', 'incident_resolved': '✅',
-    'ai_recommendation': '🤖', 'ai_report': '🤖',
+    **{f'situation_{k}':'🔎' for k in ('appeared','changed','resolved','reappeared','reminder')},
 }
 ERRORS = {
+    'AI_RETIRED': 'ИИ-помощник отключён; отправка запрещена',
+    'RESTORED_INSTALLATION': 'Очередь приостановлена после восстановления; возможен дубль',
     'KEY_MISSING': 'Токен не подключён или хранилище Windows недоступно',
     'INVALID_TOKEN': 'Токен бота неверен или отозван',
     'BOT_FORBIDDEN': 'Бот удалён из чата или не имеет права отправки',
@@ -65,7 +68,7 @@ def mentions(db: Session, ids: list[int]) -> tuple[list[str], list[str]]:
 
 
 def sender_identity(event_type: str) -> str:
-    return '👁 Argus' if event_type.startswith('ai_') else '✉️ Hermes'
+    return '👁 Argus · анализатор' if event_type.startswith('situation_') else '✉️ Hermes'
 
 
 def split_text(text: str) -> list[str]:
@@ -170,40 +173,6 @@ def event(db: Session, project_id: int, ntype: str, payload: dict, recipients: l
     enqueue(db, project_id, ntype, '\n'.join(lines), names)
 
 
-def report(db: Session, job: AdvisorJob, result: dict | None = None) -> None:
-    if job.kind != 'analysis':
-        return
-    project = db.get(Project, job.project_id)
-    lines = [f'🤖 ИИ: {"автоматический" if job.trigger == "automatic" else "ручной"} анализ #{job.id}',
-             '', f'Проект: {project.name}', '']
-    ids: set[int] = set()
-    if result is None:
-        lines.append('⚠️ Анализ не выполнен: ' + (job.error_code or 'ошибка обработки') + '. Это не положительный результат.')
-    else:
-        required = result['captain_intervention'] == 'required'
-        lines.append('⚠️ Требуется вмешательство капитана' if required else '✅ Вмешательство капитана не требуется')
-        if result.get('summary'):
-            lines += ['', 'Вывод: ' + result['summary']]
-        if required:
-            ids.update(r.user_id for r in db.query(RoleAssignment).join(User, User.id == RoleAssignment.user_id)
-                .filter(RoleAssignment.project_id == job.project_id, RoleAssignment.role == Role.captain,
-                        RoleAssignment.revoked_at.is_(None), User.active.is_(True)))
-        if not result['recommendations']:
-            lines.append('Проверка завершена. Новых рекомендаций нет.')
-        for index, item in enumerate(result['recommendations'], 1):
-            lines += ['', f'{index}. {item["title"]}', 'Ситуация: ' + item['situation'],
-                      'Основания: ' + '; '.join(item['grounds']), 'Последствия: ' + item['consequence'],
-                      'Действие: ' + item['action'], 'Ограничения: ' + '; '.join(item['limitations'])]
-            ids.update(item.get('action_user_ids', []))
-        names, missing = mentions(db, list(ids))
-        if names:
-            lines += ['', ' '.join('@' + name for name in names)]
-        if missing:
-            lines.append('Без Telegram username: ' + ', '.join(missing))
-    names, _ = mentions(db, list(ids))
-    enqueue(db, job.project_id, 'ai_report', '\n'.join(lines), names, event_key=f'ai-report:{job.id}')
-
-
 def work_once(factory: sessionmaker[Session], sender: Callable[[str, int | None, str], int] | None = None) -> bool:
     sender = sender or telegram_client.send
     now = utcnow()
@@ -213,7 +182,8 @@ def work_once(factory: sessionmaker[Session], sender: Callable[[str, int | None,
         db.query(TelegramDelivery).filter(TelegramDelivery.state == 'sending', TelegramDelivery.lease_until < now).update(
             {'state': 'uncertain', 'error_code': 'UNKNOWN_RESULT', 'lease_token': None})
         row = db.query(TelegramDelivery).filter(TelegramDelivery.state == 'pending',
-            TelegramDelivery.next_attempt_at <= now).order_by(TelegramDelivery.id).first()
+            TelegramDelivery.next_attempt_at <= now,
+            TelegramDelivery.event_type.notin_(('ai_report','ai_recommendation'))).order_by(TelegramDelivery.id).first()
         if row is None:
             db.commit()
             return False

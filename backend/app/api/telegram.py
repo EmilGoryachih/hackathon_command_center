@@ -93,6 +93,8 @@ def retry(project_id: int, delivery_id: int, body: DeliveryRetry, db: Session = 
     row = db.query(TelegramDelivery).filter_by(id=delivery_id, project_id=project_id, mode='live').first()
     if row is None:
         raise api_error(404, 'NOT_FOUND', 'Доставка не найдена')
+    if row.event_type in ('ai_report', 'ai_recommendation'):
+        raise api_error(409, 'AI_RETIRED', 'ИИ-помощник отключён; отправка старых отчётов запрещена')
     if row.state not in ('error', 'uncertain'):
         raise api_error(409, 'INVALID_STATE', 'Повтор доступен только для ошибок доставки')
     if row.state == 'uncertain' and not body.accept_duplicate_risk:

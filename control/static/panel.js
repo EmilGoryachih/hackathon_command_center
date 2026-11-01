@@ -51,7 +51,7 @@ function service(id, value) { text(id, value == null ? 'Не проверен' :
 function renderServices(s){
   const labels={ok:'Работает',error:'Сбой',loading:'Подготовка',unknown:'Не проверено',waiting:'Ожидает запуска'};
   const symbols={ok:'✓',error:'×',loading:'◌',unknown:'?',waiting:'…'};
-  const names={docker:'Docker',platform:'Платформа',fxtunnel:'fxTunnel',telegram:'Telegram',gemini:'Gemini'};
+  const names={docker:'Docker',platform:'Платформа',fxtunnel:'fxTunnel',telegram:'Telegram'};
   $('services-grid').replaceChildren();
   for(const [name,value] of Object.entries(s.services||{})){
     const button=document.createElement('button');button.type='button';button.className='service-tile';
@@ -67,7 +67,7 @@ function renderServices(s){
 function render(s) {
   state = s;
   const keyLabels={locked:'Хранилище заблокировано',valid:'✓ Ключ задан и подтверждён',invalid:'× Ключ некорректен',blocked:'× Доступ запрещён',unknown:'? Ключ задан, не проверен',missing:'Ключ не задан'};
-  for(const name of ['telegram','gemini','fxtunnel']){
+  for(const name of ['telegram','fxtunnel']){
     const key=s.keys?.[name]||{status:'unknown',detail:'Проверка не выполнялась'};
     const label=$('key-'+name);label.textContent=keyLabels[key.status]||keyLabels.unknown;
     label.className='key-state '+key.status;label.title=key.detail+(key.checked_at?' · '+stamp(key.checked_at):'');
@@ -159,7 +159,7 @@ async function refresh() { try { render(await api('status',undefined,'GET')); } 
 for(const button of document.querySelectorAll('[data-action]')) button.addEventListener('click', async()=>{ try { await api('action/'+button.dataset.action); message('Операция запущена. Состояние и результат появятся в панели.'); await refresh(); } catch(error) { message(error.message,true); } });
 $('setup-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('setup',Object.fromEntries(new FormData(event.target)));message('Установка подготовлена. Сохраните ключ оператора, соберите образ и нажмите «Старт».');await refresh();}catch(error){message(error.message,true);}});
 $('unlock-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('unlock',Object.fromEntries(new FormData(event.target)));event.target.reset();await refresh();}catch(error){message(error.message,true);}});
-$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{data.clear_keys=['telegram','gemini'].filter(name=>data['clear_'+name]==='on');delete data.clear_telegram;delete data.clear_gemini;const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.gemini.value='';event.target.elements.clear_telegram.checked=false;event.target.elements.clear_gemini.checked=false;message(result.message);await refresh();await api('action/keys-check');}catch(error){message(error.message,true);}});
+$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{data.clear_keys=['telegram'].filter(name=>data['clear_'+name]==='on');delete data.clear_telegram;const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.clear_telegram.checked=false;message(result.message);await refresh();await api('action/keys-check');}catch(error){message(error.message,true);}});
 $('show-key').addEventListener('click',async()=>{
   try{
     const data=await api('operator');
@@ -184,7 +184,7 @@ $('close-key').addEventListener('click',closeKey);$('key-dialog').addEventListen
 $('restore-form').addEventListener('submit',async event=>{event.preventDefault();try{const result=await api('restore/inspect',new FormData(event.target));restoreTicket=result.ticket;text('restore-description',`${result.warning} Снимок ${result.manifest.created_at}; версия ${result.manifest.application}; схема ${result.manifest.schema}.`);event.target.elements.key.value='';$('restore-dialog').showModal();}catch(error){message(error.message,true);}});
 $('cancel-restore').addEventListener('click',()=>{$('restore-dialog').close();restoreTicket=null;});
 $('apply-restore').addEventListener('click',async()=>{try{$('apply-restore').disabled=true;await api('restore/apply',{ticket:restoreTicket,confirm:true});$('restore-dialog').close();message('Восстановлено. Завершите перенос, затем запустите платформу и проверьте вход оператора.');await refresh();}catch(error){message(error.message,true);}finally{$('apply-restore').disabled=false;}});
-$('activate').addEventListener('click',async()=>{try{await api('transfer/activate',{previous_server_stopped:$('old-stopped').checked,accept_quota_pause:$('old-stopped').checked});await refresh();message('Перенос подтверждён. Введите интеграционные секреты и запустите платформу.');}catch(error){message(error.message,true);}});
+$('activate').addEventListener('click',async()=>{try{await api('transfer/activate',{previous_server_stopped:$('old-stopped').checked});await refresh();message('Перенос подтверждён. Введите интеграционные секреты и запустите платформу.');}catch(error){message(error.message,true);}});
 $('check-dependencies').addEventListener('click',async()=>{try{message('Проверяем компоненты…');await api('dependencies/check');await refresh();}catch(error){message(error.message,true);}});
 $('install-dependencies').addEventListener('click',async()=>{try{await api('dependencies/install');message('Шаг установки запущен. Прогресс и необходимые действия появятся в панели.');}catch(error){message(error.message,true);}});
 $('autostart-toggle').addEventListener('click',async()=>{try{await api('autostart',{enabled:!state.autostart});await refresh();}catch(error){message(error.message,true);}});
