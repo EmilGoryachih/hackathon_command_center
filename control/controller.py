@@ -423,7 +423,8 @@ class Controller:
         tunnel = state('waiting', 'Ожидаем готовности Aion') if desired and not (self.status['api'] and self.status['ui']) else state('ok', self.tunnel.current_url) if self.tunnel.current_url else state(
             'loading' if self.tunnel.process and self.tunnel.process.poll() is None else 'error' if desired and self.config.get('tunnel_desired') else 'waiting',
             self.tunnel.error or 'Ожидает открытия')
-        telegram = state('error', self.history['telegram_error']) if self.history.get('telegram_error') else state(
+        telegram_error = self.history.get('telegram_error') or self.history.get('alert_error')
+        telegram = state('error', telegram_error) if telegram_error else state(
             'ok' if self.history.get('telegram_at') or self.history.get('alert_at') else 'unknown' if self.config.get('telegram_chat') or self.config.get('telegram_alert_chat') else 'waiting',
             'Последняя отправка подтверждена' if self.history.get('telegram_at') or self.history.get('alert_at') else 'Сохраните направления и отправьте тест')
         return {'docker': engine, 'platform': api, 'fxtunnel': tunnel, 'telegram': telegram}

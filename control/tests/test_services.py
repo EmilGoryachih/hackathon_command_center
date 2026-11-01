@@ -36,3 +36,13 @@ def test_alert_failure_keeps_queue_and_does_not_interrupt_backups(tmp_path):
         c.deliver_alerts()
     assert c.history['alert_outbox']
     assert c.history['alert_error'] == 'Нет прав'
+
+
+def test_alert_delivery_error_overrides_previous_telegram_success(tmp_path):
+    c = Controller(tmp_path)
+    c.history.update(telegram_at=123, alert_error='Нет связи с Telegram')
+    assert c.service_states()['telegram'] == {
+        'status': 'error', 'detail': 'Нет связи с Telegram',
+    }
+    c.history.update(alert_error=None, alert_at=124)
+    assert c.service_states()['telegram']['status'] == 'ok'

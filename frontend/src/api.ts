@@ -281,11 +281,21 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit, previewAttempt=0): Promise<T> {
-  const res = await fetch(path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
+  const mutation=!!init?.method && !['GET','HEAD','OPTIONS'].includes(init.method.toUpperCase())
+  const connectionLost=():never=>{
+    if(mutation)window.dispatchEvent(new Event('project-updated'))
+    throw new ApiError(0,mutation?'NETWORK_RESULT_UNKNOWN':'NETWORK_ERROR',mutation
+      ?'Связь прервана. Изменение могло сохраниться. После восстановления связи проверьте актуальное состояние перед повтором действия.'
+      :'Нет связи с сервером. Проверьте подключение и обновите данные.')
+  }
+  let res:Response
+  try {
+    res = await fetch(path, {
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+    })
+  } catch { return connectionLost() }
   if (!res.ok) {
     let code = 'HTTP_ERROR'
     let message = res.statusText
@@ -306,7 +316,8 @@ async function request<T>(path: string, init?: RequestInit, previewAttempt=0): P
     if(code==='VERSION_CONFLICT')window.dispatchEvent(new Event('project-updated'))
     throw new ApiError(res.status, code, message)
   }
-  const body=await res.json()
+  let body:T
+  try { body=await res.json() } catch { return connectionLost() }
   if(init?.method && !['GET','HEAD'].includes(init.method))window.dispatchEvent(new Event('project-updated'))
   return body
 }
