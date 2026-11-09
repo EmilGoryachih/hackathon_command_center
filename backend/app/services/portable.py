@@ -17,6 +17,8 @@ _local_operation_lock = RLock()
 
 
 def current_public_url() -> str:
+    if settings.app_public_url:
+        return settings.app_public_url
     try:
         value = json.loads((settings.data_dir / '.public-url.json').read_text())
         url = value.get('url', '')
